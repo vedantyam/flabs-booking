@@ -12,9 +12,15 @@ function getTodayStr() {
   return new Date().toISOString().split('T')[0];
 }
 
+// Normalize "HH:MM:SS" (Supabase format) → "HH:MM" for <input type="time">
+function normalizeTime(t) {
+  if (!t) return '';
+  return t.substring(0, 5);
+}
+
 function timeLabel(t) {
   if (!t) return '—';
-  const [h, m] = t.split(':').map(Number);
+  const [h, m] = normalizeTime(t).split(':').map(Number);
   const ampm = h >= 12 ? 'PM' : 'AM';
   const dh = h > 12 ? h - 12 : h === 0 ? 12 : h;
   return `${dh}:${m.toString().padStart(2, '0')} ${ampm}`;
@@ -30,14 +36,14 @@ const EMPTY_FORM = {
 
 export default function SupportPersonManager() {
   const [persons, setPersons] = useState([]);
-  const [todayWoDays, setTodayWoDays] = useState([]); // wo-day entries for today only
+  const [todayWoDays, setTodayWoDays] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [toggling, setToggling] = useState(null); // person id currently being toggled
+  const [toggling, setToggling] = useState(null);
 
   const today = getTodayStr();
 
@@ -60,7 +66,6 @@ export default function SupportPersonManager() {
     }
   }
 
-  // Returns the wo-day id for a person if they are absent today, else null
   function getTodayWoId(personId) {
     const wo = todayWoDays.find(w => w.support_person_id === personId);
     return wo ? wo.id : null;
@@ -71,11 +76,9 @@ export default function SupportPersonManager() {
     setToggling(person.id);
     try {
       if (woId) {
-        // Absent → Present: remove wo-day
         await axios.delete(`${API_URL}/api/wo-days/${woId}`, { headers: authHeader() });
         setTodayWoDays(w => w.filter(x => x.id !== woId));
       } else {
-        // Present → Absent: add wo-day for today
         const res = await axios.post(
           `${API_URL}/api/wo-days`,
           { support_person_id: person.id, date: today },
@@ -100,12 +103,12 @@ export default function SupportPersonManager() {
     setForm({
       name: person.name || '',
       email: person.email || '',
-      work_start: person.work_start || '10:00',
-      work_end: person.work_end || '18:00',
-      lunch_start: person.lunch_start || '',
-      lunch_end: person.lunch_end || '',
-      tea_start: person.tea_start || '',
-      tea_end: person.tea_end || '',
+      work_start: normalizeTime(person.work_start) || '10:00',
+      work_end: normalizeTime(person.work_end) || '18:00',
+      lunch_start: normalizeTime(person.lunch_start),
+      lunch_end: normalizeTime(person.lunch_end),
+      tea_start: normalizeTime(person.tea_start),
+      tea_end: normalizeTime(person.tea_end),
       is_active: person.is_active !== false,
     });
     setEditId(person.id);
@@ -168,20 +171,44 @@ export default function SupportPersonManager() {
 
       {/* Add / Edit form */}
       {showForm && (
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-4">
           <h3 className="font-medium text-gray-800">
             {editId ? 'Edit Support Person' : 'Add Support Person'}
           </h3>
+
+          {/* Name & Email */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Name *"      value={form.name}        onChange={v => setForm(f => ({ ...f, name: v }))}        placeholder="e.g. Tanuj Sharma" />
-            <Field label="Email"       type="email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="e.g. tanuj@flabs.in" />
-            <Field label="Work Start *" type="time" value={form.work_start}  onChange={v => setForm(f => ({ ...f, work_start: v }))} />
-            <Field label="Work End *"   type="time" value={form.work_end}    onChange={v => setForm(f => ({ ...f, work_end: v }))} />
-            <Field label="Lunch Start"  type="time" value={form.lunch_start} onChange={v => setForm(f => ({ ...f, lunch_start: v }))} />
-            <Field label="Lunch End"    type="time" value={form.lunch_end}   onChange={v => setForm(f => ({ ...f, lunch_end: v }))} />
-            <Field label="Tea Break Start" type="time" value={form.tea_start} onChange={v => setForm(f => ({ ...f, tea_start: v }))} />
-            <Field label="Tea Break End"   type="time" value={form.tea_end}   onChange={v => setForm(f => ({ ...f, tea_end: v }))} />
+            <Field label="Name *"  value={form.name}  onChange={v => setForm(f => ({ ...f, name: v }))}  placeholder="e.g. Tanuj Sharma" />
+            <Field label="Email"   type="email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="e.g. tanuj@flabs.in" />
           </div>
+
+          {/* Work hours */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Work Start *" type="time" value={form.work_start} onChange={v => setForm(f => ({ ...f, work_start: v }))} />
+            <Field label="Work End *"   type="time" value={form.work_end}   onChange={v => setForm(f => ({ ...f, work_end: v }))} />
+          </div>
+
+          {/* Break times */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Break Times</p>
+            <BreakRow
+              label="Lunch Break"
+              start={form.lunch_start}
+              end={form.lunch_end}
+              onStart={v => setForm(f => ({ ...f, lunch_start: v }))}
+              onEnd={v => setForm(f => ({ ...f, lunch_end: v }))}
+              onClear={() => setForm(f => ({ ...f, lunch_start: '', lunch_end: '' }))}
+            />
+            <BreakRow
+              label="Tea Break"
+              start={form.tea_start}
+              end={form.tea_end}
+              onStart={v => setForm(f => ({ ...f, tea_start: v }))}
+              onEnd={v => setForm(f => ({ ...f, tea_end: v }))}
+              onClear={() => setForm(f => ({ ...f, tea_start: '', tea_end: '' }))}
+            />
+          </div>
+
           <div className="flex gap-2 pt-1">
             <button
               onClick={handleSave}
@@ -295,6 +322,36 @@ function Field({ label, value, onChange, type = 'text', placeholder }) {
         placeholder={placeholder}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
+    </div>
+  );
+}
+
+function BreakRow({ label, start, end, onStart, onEnd, onClear }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-xs font-medium text-gray-600 w-24 shrink-0">{label}:</span>
+      <input
+        type="time"
+        value={start}
+        onChange={e => onStart(e.target.value)}
+        className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      <span className="text-xs text-gray-400">to</span>
+      <input
+        type="time"
+        value={end}
+        onChange={e => onEnd(e.target.value)}
+        className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+      {(start || end) && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-xs text-gray-400 hover:text-red-500 transition ml-1"
+        >
+          ✕ Clear
+        </button>
+      )}
     </div>
   );
 }

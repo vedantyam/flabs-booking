@@ -17,7 +17,7 @@ router.get('/', async (req, res, next) => {
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('support_persons')
-      .select('id, name, work_start, work_end, is_active')
+      .select('id, name, work_start, work_end, lunch_start, lunch_end, tea_start, tea_end, is_active')
       .order('name');
     if (error) throw error;
     res.json(data);
@@ -55,9 +55,19 @@ router.put('/:id', requireAuth, async (req, res, next) => {
     const { id } = req.params;
     const { name, email, work_start, work_end, lunch_start, lunch_end, tea_start, tea_end, is_active } = req.body;
 
+    // Convert empty strings to null for time fields
+    const clean = v => (v === '' || v === undefined) ? null : v;
+
     const { data, error } = await supabase
       .from('support_persons')
-      .update({ name, email, work_start, work_end, lunch_start, lunch_end, tea_start, tea_end, is_active })
+      .update({
+        name, email, work_start, work_end,
+        lunch_start: clean(lunch_start),
+        lunch_end: clean(lunch_end),
+        tea_start: clean(tea_start),
+        tea_end: clean(tea_end),
+        is_active,
+      })
       .eq('id', id)
       .select()
       .single();

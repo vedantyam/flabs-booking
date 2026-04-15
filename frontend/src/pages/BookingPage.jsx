@@ -17,13 +17,12 @@ function formatSelectedDate(dateStr) {
 function statusIcon(status) {
   if (status === 'free') return '✅';
   if (status === 'busy') return '🔴';
-  return '⬜';
+  return '──';
 }
 
 function statusLabel(p) {
   if (p.status === 'free') return 'Free';
   if (p.status === 'not_working') return 'Not working';
-  // busy — show reason if available
   if (!p.reason) return 'Busy';
   return p.reason.charAt(0).toUpperCase() + p.reason.slice(1);
 }
@@ -193,51 +192,43 @@ export default function BookingPage() {
           onClick={() => setDetailModal(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3"
+            className="bg-white rounded-2xl shadow-xl w-full max-w-xs p-5"
             onClick={e => e.stopPropagation()}
           >
-            {/* Modal header */}
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-gray-800 text-base">
-                {detailModal.slot.start} – {detailModal.slot.end}
-              </h3>
-              <button
-                onClick={() => setDetailModal(null)}
-                className="text-gray-400 hover:text-gray-600 transition text-lg leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100"
-              >
-                ✕
-              </button>
-            </div>
+            {/* Time heading */}
+            <p className="text-sm font-semibold text-gray-800 mb-3">
+              {detailModal.slot.start} – {detailModal.slot.end}
+            </p>
 
-            <hr className="border-gray-100" />
+            <hr className="border-gray-100 mb-3" />
 
             {/* Loading */}
             {detailModal.loading && (
-              <div className="flex items-center justify-center gap-2 text-gray-400 py-5">
-                <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              <div className="flex items-center justify-center gap-2 text-gray-400 py-4">
+                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                 <span className="text-sm">Loading…</span>
               </div>
             )}
 
             {/* Error */}
             {!detailModal.loading && detailModal.error && (
-              <p className="text-sm text-red-600 py-2">{detailModal.error}</p>
+              <p className="text-sm text-red-500 py-2">{detailModal.error}</p>
             )}
 
-            {/* Person list */}
+            {/* Person rows — one per person, no scroll */}
             {!detailModal.loading && !detailModal.error && detailModal.persons && (
-              <div className="divide-y divide-gray-50">
+              <div className="space-y-2.5">
                 {detailModal.persons.map(p => (
-                  <div key={p.name} className="flex items-center justify-between py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-base leading-none">{statusIcon(p.status)}</span>
-                      <span className={`text-sm font-medium ${
+                  <div key={p.name} className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm leading-none shrink-0">{statusIcon(p.status)}</span>
+                      <span className={`text-sm font-medium truncate ${
                         p.status === 'not_working' ? 'text-gray-400' : 'text-gray-800'
                       }`}>
                         {p.name}
                       </span>
                     </div>
-                    <span className={`text-xs font-medium ${
+                    <span className={`text-xs font-medium shrink-0 ${
                       p.status === 'free'        ? 'text-green-600' :
                       p.status === 'busy'        ? 'text-red-500'   :
                                                    'text-gray-400'
@@ -249,7 +240,7 @@ export default function BookingPage() {
               </div>
             )}
 
-            <hr className="border-gray-100" />
+            <hr className="border-gray-100 mt-4 mb-3" />
 
             <button
               onClick={() => setDetailModal(null)}

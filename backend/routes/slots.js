@@ -111,7 +111,15 @@ router.get('/detail', async (req, res, next) => {
     const slotStartMin = timeToMinutes(start);
     const slotEndMin   = timeToMinutes(end);
 
-    const result = (persons || []).map(person => {
+    // Deduplicate persons by id (guards against duplicate rows in DB)
+    const seenIds = new Set();
+    const uniquePersons = (persons || []).filter(p => {
+      if (seenIds.has(p.id)) return false;
+      seenIds.add(p.id);
+      return true;
+    });
+
+    const result = uniquePersons.map(person => {
       const workStart = timeToMinutes(person.work_start);
       const workEnd   = timeToMinutes(person.work_end);
 

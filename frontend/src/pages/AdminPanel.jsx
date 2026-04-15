@@ -69,7 +69,7 @@ export default function AdminPanel() {
         {activeTab === 'calendar' && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             <iframe
-              src="https://calendar.google.com/calendar/embed?src=support%40flabs.in&ctz=Asia%2FKolkata&mode=WEEK&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=1&showTz=1"
+              src="https://calendar.google.com/calendar/embed?src=support%40flabs.in&ctz=Asia%2FKolkata"
               style={{ border: 0 }}
               width="100%"
               height="650"

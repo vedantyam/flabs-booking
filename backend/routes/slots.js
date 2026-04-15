@@ -1,7 +1,7 @@
 const express = require('express');
 const { DateTime } = require('luxon');
 const { createClient } = require('@supabase/supabase-js');
-const { getDaySlotsWithAvailability } = require('../services/slotLogic');
+const { getDaySlotsWithAvailability, timeToMinutes, normalizeTime, toUTCISO } = require('../services/slotLogic');
 const gcalService = require('../services/googleCalendar');
 
 const router = express.Router();
@@ -58,6 +58,115 @@ router.get('/week', async (req, res, next) => {
     );
 
     res.json({ start, week: weekData });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/slots/detail?date=YYYY-MM-DD&start=HH:MM&end=HH:MM
+// Returns each active support person's status for that specific slot
+router.get('/detail', async (req, res, next) => {
+  try {
+    const { date, start, end } = req.query;
+    if (!date || !isValidDate(date) || !start || !end) {
+      return res.status(400).json({ error: 'date, start, and end are required' });
+    }
+
+    const supabase = getSupabase();
+
+    // Active support persons
+    const { data: persons, error: personsError } = await supabase
+      .from('support_persons')
+      .select('*')
+      .eq('is_active', true);
+    if (personsError) throw personsError;
+
+    // WO days for this date
+    const { data: woDays, error: woError } = await supabase
+      .from('wo_days')
+      .select('support_person_id')
+      .eq('date', date);
+    if (woError) throw woError;
+    const woPersonIds = new Set((woDays || []).map(w => w.support_person_id));
+
+    // Bookings for this date
+    const { data: bookings, error: bookingsError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('date', date);
+    if (bookingsError) throw bookingsError;
+
+    // Google Calendar freebusy (best-effort)
+    let gcalBusy = {};
+    if (persons && persons.length > 0) {
+      try {
+        const dayStartUTC = toUTCISO(date, '00:00');
+        const dayEndUTC   = toUTCISO(date, '23:59');
+        gcalBusy = await gcalService.getFreeBusy(persons, dayStartUTC, dayEndUTC);
+      } catch (err) {
+        console.error('Google Calendar freebusy error:', err.message);
+      }
+    }
+
+    const slotStartMin = timeToMinutes(start);
+    const slotEndMin   = timeToMinutes(end);
+
+    const result = (persons || []).map(person => {
+      const workStart = timeToMinutes(person.work_start);
+      const workEnd   = timeToMinutes(person.work_end);
+
+      // Outside working hours
+      if (slotStartMin < workStart || slotEndMin > workEnd) {
+        return { name: person.name, status: 'not_working', reason: 'outside working hours' };
+      }
+
+      // On WO day
+      if (woPersonIds.has(person.id)) {
+        return { name: person.name, status: 'busy', reason: 'day off' };
+      }
+
+      // On lunch break
+      if (person.lunch_start && person.lunch_end) {
+        const lunchStart = timeToMinutes(person.lunch_start);
+        const lunchEnd   = timeToMinutes(person.lunch_end);
+        if (slotStartMin < lunchEnd && slotEndMin > lunchStart) {
+          return { name: person.name, status: 'busy', reason: 'lunch break' };
+        }
+      }
+
+      // On tea break
+      if (person.tea_start && person.tea_end) {
+        const teaStart = timeToMinutes(person.tea_start);
+        const teaEnd   = timeToMinutes(person.tea_end);
+        if (slotStartMin < teaEnd && slotEndMin > teaStart) {
+          return { name: person.name, status: 'busy', reason: 'tea break' };
+        }
+      }
+
+      // Has an existing booking overlapping this slot
+      const hasBooking = (bookings || []).some(b =>
+        b.support_person_id === person.id &&
+        normalizeTime(b.slot_start) < end &&
+        normalizeTime(b.slot_end) > start
+      );
+      if (hasBooking) {
+        return { name: person.name, status: 'busy', reason: 'existing booking' };
+      }
+
+      // Busy on Google Calendar
+      if (gcalBusy && gcalBusy[person.email]) {
+        const isBusy = gcalBusy[person.email].some(
+          busy => busy.start < end && busy.end > start
+        );
+        if (isBusy) {
+          return { name: person.name, status: 'busy', reason: 'calendar event' };
+        }
+      }
+
+      return { name: person.name, status: 'free' };
+    });
+
+    res.json(result);
   } catch (err) {
     next(err);
   }

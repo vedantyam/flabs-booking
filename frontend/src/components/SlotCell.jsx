@@ -1,21 +1,25 @@
 import React from 'react';
 
-// Format "10:00" → "10:00" (keep as-is, already HH:MM from API)
-// Displayed as "10:00 - 10:30"
-export default function SlotCell({ slot }) {
+export default function SlotCell({ slot, onClick }) {
   if (!slot) return null;
 
   if (slot.available) {
     return (
-      <div className="rounded-lg bg-green-50 px-3 py-2.5 text-sm text-green-800 font-medium">
+      <button
+        onClick={onClick}
+        className="w-full text-left rounded-lg bg-green-50 px-3 py-2.5 text-sm text-green-800 font-medium hover:bg-green-100 active:bg-green-200 transition cursor-pointer"
+      >
         {slot.start} – {slot.end}
-      </div>
+      </button>
     );
   }
 
   return (
-    <div className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-300 line-through">
+    <button
+      onClick={onClick}
+      className="w-full text-left rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-300 line-through hover:bg-red-100 active:bg-red-200 transition cursor-pointer"
+    >
       {slot.start} – {slot.end}
-    </div>
+    </button>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import CalendarGrid from '../components/CalendarGrid.jsx';
 import SlotCell from '../components/SlotCell.jsx';
@@ -14,14 +14,31 @@ function formatSelectedDate(dateStr) {
   return d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
+function statusIcon(status) {
+  if (status === 'free') return '✅';
+  if (status === 'busy') return '🔴';
+  return '⬜';
+}
+
+function statusLabel(p) {
+  if (p.status === 'free') return 'Free';
+  if (p.status === 'not_working') return 'Not working';
+  // busy — show reason if available
+  if (!p.reason) return 'Busy';
+  return p.reason.charAt(0).toUpperCase() + p.reason.slice(1);
+}
+
 export default function BookingPage() {
   const today = getTodayStr();
   const [selectedDate, setSelectedDate] = useState(today);
   const [weekData, setWeekData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  // Mobile: toggle between calendar and slots view
   const [mobileView, setMobileView] = useState('calendar');
+
+  // Slot detail modal state
+  const [detailModal, setDetailModal] = useState(null);
+  // detailModal shape: { slot: { start, end }, loading: bool, persons: [], error: '' }
 
   useEffect(() => {
     setLoading(true);
@@ -33,6 +50,16 @@ export default function BookingPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Close modal on Escape key
+  useEffect(() => {
+    if (!detailModal) return;
+    function onKey(e) {
+      if (e.key === 'Escape') setDetailModal(null);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [detailModal]);
+
   function getSlotsForDate(dateStr) {
     const dayData = weekData.find(d => d.date === dateStr);
     return dayData?.slots || [];
@@ -41,6 +68,21 @@ export default function BookingPage() {
   function handleDateSelect(dateStr) {
     setSelectedDate(dateStr);
     setMobileView('slots');
+  }
+
+  async function handleSlotClick(slot) {
+    // Open modal in loading state immediately
+    setDetailModal({ slot, loading: true, persons: null, error: '' });
+    try {
+      const res = await axios.get(`${API_URL}/api/slots/detail`, {
+        params: { date: selectedDate, start: slot.start, end: slot.end },
+      });
+      setDetailModal({ slot, loading: false, persons: res.data, error: '' });
+    } catch {
+      setDetailModal(prev =>
+        prev ? { ...prev, loading: false, error: 'Failed to load details.' } : null
+      );
+    }
   }
 
   const slots = getSlotsForDate(selectedDate);
@@ -91,7 +133,7 @@ export default function BookingPage() {
             <h2 className="text-base font-semibold text-gray-800">
               {selectedDate ? formatSelectedDate(selectedDate) : 'Select a date'}
             </h2>
-            <p className="text-xs text-gray-400 mt-0.5">30-minute slots</p>
+            <p className="text-xs text-gray-400 mt-0.5">30-minute slots · click any slot to see who's free</p>
           </div>
 
           {/* Slot grid */}
@@ -131,7 +173,11 @@ export default function BookingPage() {
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                   {slots.map(slot => (
-                    <SlotCell key={slot.start} slot={slot} />
+                    <SlotCell
+                      key={slot.start}
+                      slot={slot}
+                      onClick={() => handleSlotClick(slot)}
+                    />
                   ))}
                 </div>
               </>
@@ -139,6 +185,81 @@ export default function BookingPage() {
           </div>
         </section>
       </div>
+
+      {/* ── Slot Detail Modal ── */}
+      {detailModal && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={() => setDetailModal(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-3"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800 text-base">
+                {detailModal.slot.start} – {detailModal.slot.end}
+              </h3>
+              <button
+                onClick={() => setDetailModal(null)}
+                className="text-gray-400 hover:text-gray-600 transition text-lg leading-none w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100"
+              >
+                ✕
+              </button>
+            </div>
+
+            <hr className="border-gray-100" />
+
+            {/* Loading */}
+            {detailModal.loading && (
+              <div className="flex items-center justify-center gap-2 text-gray-400 py-5">
+                <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm">Loading…</span>
+              </div>
+            )}
+
+            {/* Error */}
+            {!detailModal.loading && detailModal.error && (
+              <p className="text-sm text-red-600 py-2">{detailModal.error}</p>
+            )}
+
+            {/* Person list */}
+            {!detailModal.loading && !detailModal.error && detailModal.persons && (
+              <div className="divide-y divide-gray-50">
+                {detailModal.persons.map(p => (
+                  <div key={p.name} className="flex items-center justify-between py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-base leading-none">{statusIcon(p.status)}</span>
+                      <span className={`text-sm font-medium ${
+                        p.status === 'not_working' ? 'text-gray-400' : 'text-gray-800'
+                      }`}>
+                        {p.name}
+                      </span>
+                    </div>
+                    <span className={`text-xs font-medium ${
+                      p.status === 'free'        ? 'text-green-600' :
+                      p.status === 'busy'        ? 'text-red-500'   :
+                                                   'text-gray-400'
+                    }`}>
+                      {statusLabel(p)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <hr className="border-gray-100" />
+
+            <button
+              onClick={() => setDetailModal(null)}
+              className="w-full text-sm text-gray-500 hover:text-gray-700 transition py-1 rounded-lg hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import SlotCell from './SlotCell.jsx';
+import React, { useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-function getWeekStart() {
-  // Start from today (IST-aware: just use local date)
-  const today = new Date();
-  return today.toISOString().split('T')[0];
+function getTodayStr() {
+  return new Date().toISOString().split('T')[0];
 }
 
 function addDays(dateStr, n) {
@@ -16,222 +16,126 @@ function addDays(dateStr, n) {
   return d.toISOString().split('T')[0];
 }
 
-function formatDayHeader(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  const day = d.toLocaleDateString('en-IN', { weekday: 'short' });
-  const date = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-  return { day, date };
-}
+export default function CalendarGrid({ selectedDate, onDateSelect }) {
+  const today = getTodayStr();
+  const maxDate = addDays(today, 6);
 
-function isToday(dateStr) {
-  return dateStr === new Date().toISOString().split('T')[0];
-}
+  const todayDateObj = new Date(today + 'T00:00:00');
+  const [displayYear, setDisplayYear] = useState(todayDateObj.getFullYear());
+  const [displayMonth, setDisplayMonth] = useState(todayDateObj.getMonth());
 
-export default function CalendarGrid({ onSlotClick }) {
-  const [weekStart, setWeekStart] = useState(getWeekStart());
-  const [weekData, setWeekData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  // For mobile: show one day at a time
-  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
+  // Build the grid cells for this month
+  const daysInMonth = new Date(displayYear, displayMonth + 1, 0).getDate();
+  const firstDow = new Date(displayYear, displayMonth, 1).getDay(); // 0=Sun
+  // Monday-first: Sun maps to padding 6, Mon→0, Tue→1 …
+  const startPadding = firstDow === 0 ? 6 : firstDow - 1;
 
-  useEffect(() => {
-    loadWeek(weekStart);
-  }, [weekStart]);
-
-  async function loadWeek(start) {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await axios.get(`${API_URL}/api/slots/week?start=${start}`);
-      setWeekData(res.data.week || []);
-    } catch (err) {
-      setError('Failed to load slots. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+  const cells = [];
+  for (let i = 0; i < startPadding; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(
+      `${displayYear}-${String(displayMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    );
   }
 
-  function handlePrev() {
-    // Don't go before today
-    const newStart = addDays(weekStart, -7);
-    const today = getWeekStart();
-    if (newStart < today) return;
-    setWeekStart(newStart);
-    setSelectedDayIndex(0);
+  // Don't allow navigating to a month before the current month
+  const currentMonthIdx = todayDateObj.getFullYear() * 12 + todayDateObj.getMonth();
+  const displayMonthIdx = displayYear * 12 + displayMonth;
+  const canGoPrev = displayMonthIdx > currentMonthIdx;
+
+  function prevMonth() {
+    if (!canGoPrev) return;
+    if (displayMonth === 0) { setDisplayYear(y => y - 1); setDisplayMonth(11); }
+    else setDisplayMonth(m => m - 1);
   }
 
-  function handleNext() {
-    const newStart = addDays(weekStart, 7);
-    setWeekStart(newStart);
-    setSelectedDayIndex(0);
+  function nextMonth() {
+    if (displayMonth === 11) { setDisplayYear(y => y + 1); setDisplayMonth(0); }
+    else setDisplayMonth(m => m + 1);
   }
-
-  // All unique time labels across all days
-  const allTimes = weekData.length > 0
-    ? weekData[0].slots.map(s => s.start)
-    : [];
-
-  const today = getWeekStart();
 
   return (
-    <div>
-      {/* Week navigation */}
-      <div className="flex items-center justify-between mb-4">
+    <div className="select-none">
+      {/* Month navigation */}
+      <div className="flex items-center justify-between mb-5">
         <button
-          onClick={handlePrev}
-          disabled={weekStart <= today}
-          className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
-          title="Previous week"
+          onClick={prevMonth}
+          disabled={!canGoPrev}
+          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 disabled:opacity-25 transition text-gray-500 text-xl leading-none"
         >
-          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          ‹
         </button>
-        <div className="text-center">
-          <p className="font-semibold text-gray-800 text-sm">
-            {new Date(weekStart + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
-            {' – '}
-            {new Date(addDays(weekStart, 6) + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
-        </div>
+        <span className="text-sm font-semibold text-gray-800">
+          {MONTH_NAMES[displayMonth]} {displayYear}
+        </span>
         <button
-          onClick={handleNext}
-          className="p-2 rounded-lg hover:bg-gray-100 transition"
-          title="Next week"
+          onClick={nextMonth}
+          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition text-gray-500 text-xl leading-none"
         >
-          <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
+          ›
         </button>
+      </div>
+
+      {/* Day-of-week headers */}
+      <div className="grid grid-cols-7 mb-1">
+        {DAY_NAMES.map(d => (
+          <div key={d} className="text-center text-xs font-medium text-gray-400 py-1">
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Date cells */}
+      <div className="grid grid-cols-7 gap-y-1">
+        {cells.map((dateStr, i) => {
+          if (!dateStr) return <div key={`pad-${i}`} />;
+
+          const isSelected  = dateStr === selectedDate;
+          const isToday     = dateStr === today;
+          const isClickable = dateStr >= today && dateStr <= maxDate;
+
+          let cellCls =
+            'aspect-square w-full max-w-[36px] mx-auto flex items-center justify-center rounded-full text-sm transition-all ';
+
+          if (isSelected) {
+            cellCls += 'bg-blue-600 text-white font-semibold ';
+          } else if (isClickable) {
+            cellCls += 'text-gray-800 font-medium hover:bg-blue-50 hover:text-blue-600 cursor-pointer ';
+          } else {
+            cellCls += 'text-gray-300 cursor-default ';
+          }
+
+          if (isToday && !isSelected) {
+            cellCls += 'ring-2 ring-blue-400 ring-offset-1 font-semibold ';
+          }
+
+          return (
+            <button
+              key={dateStr}
+              onClick={() => isClickable && onDateSelect(dateStr)}
+              disabled={!isClickable}
+              className={cellCls}
+            >
+              {new Date(dateStr + 'T00:00:00').getDate()}
+            </button>
+          );
+        })}
       </div>
 
       {/* Legend */}
-      <div className="flex gap-4 mb-4 text-xs">
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-green-200 border border-green-300 inline-block" />
-          Available
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded bg-red-100 border border-red-200 inline-block" />
-          Booked
-        </span>
+      <div className="mt-6 pt-4 border-t border-gray-100 space-y-2">
+        <p className="text-xs text-gray-400">Click a highlighted date to see slots</p>
+        <div className="flex gap-4 text-xs text-gray-400">
+          <span className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded-full ring-2 ring-blue-400 ring-offset-1 inline-block" />
+            Today
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded-full bg-blue-600 inline-block" />
+            Selected
+          </span>
+        </div>
       </div>
-
-      {loading && (
-        <div className="text-center py-12 text-gray-500">
-          <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-3" />
-          Loading slots...
-        </div>
-      )}
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
-          {error}
-        </div>
-      )}
-
-      {!loading && weekData.length > 0 && (
-        <>
-          {/* Mobile: Day tabs */}
-          <div className="md:hidden flex overflow-x-auto gap-2 mb-4 pb-1">
-            {weekData.map((dayData, i) => {
-              const { day, date } = formatDayHeader(dayData.date);
-              const isTodayDay = isToday(dayData.date);
-              return (
-                <button
-                  key={dayData.date}
-                  onClick={() => setSelectedDayIndex(i)}
-                  className={`flex-shrink-0 flex flex-col items-center px-3 py-2 rounded-lg border text-xs transition
-                    ${selectedDayIndex === i
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : isTodayDay
-                        ? 'bg-blue-50 border-blue-200 text-blue-700'
-                        : 'bg-white border-gray-200 text-gray-700'
-                    }`}
-                >
-                  <span className="font-semibold">{day}</span>
-                  <span>{date}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Mobile: Single day column */}
-          <div className="md:hidden">
-            {weekData[selectedDayIndex] && (
-              <div className="space-y-2">
-                {weekData[selectedDayIndex].slots.map(slot => (
-                  <div key={slot.start} className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400 w-16 text-right flex-shrink-0">
-                      {formatTimeMobile(slot.start)}
-                    </span>
-                    <div className="flex-1">
-                      <SlotCell
-                        slot={{ ...slot, date: weekData[selectedDayIndex].date }}
-                        onClick={onSlotClick}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Desktop: Full week grid */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <th className="w-16 text-xs text-gray-400 font-normal py-2" />
-                  {weekData.map(dayData => {
-                    const { day, date } = formatDayHeader(dayData.date);
-                    const isTodayDay = isToday(dayData.date);
-                    return (
-                      <th
-                        key={dayData.date}
-                        className={`text-center py-2 px-1 text-xs ${isTodayDay ? 'text-blue-600' : 'text-gray-600'}`}
-                      >
-                        <div className={`font-semibold ${isTodayDay ? 'text-blue-700' : ''}`}>{day}</div>
-                        <div className={`font-normal ${isTodayDay ? 'text-blue-500' : 'text-gray-400'}`}>{date}</div>
-                        {isTodayDay && <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mx-auto mt-1" />}
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {allTimes.map(time => (
-                  <tr key={time}>
-                    <td className="text-right pr-2 text-xs text-gray-400 py-0.5 align-middle">
-                      {formatTimeMobile(time)}
-                    </td>
-                    {weekData.map(dayData => {
-                      const slot = dayData.slots.find(s => s.start === time);
-                      return (
-                        <td key={dayData.date} className="px-0.5 py-0.5">
-                          <SlotCell
-                            slot={slot ? { ...slot, date: dayData.date } : null}
-                            onClick={onSlotClick}
-                          />
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
     </div>
   );
-}
-
-function formatTimeMobile(t) {
-  if (!t) return '';
-  const [h, m] = t.split(':').map(Number);
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const displayH = h > 12 ? h - 12 : h === 0 ? 12 : h;
-  return `${displayH}:${m.toString().padStart(2, '0')}`;
 }

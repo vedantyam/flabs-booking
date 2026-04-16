@@ -3,6 +3,18 @@ import React from 'react';
 export default function SlotCell({ slot, onClick }) {
   if (!slot) return null;
 
+  // Grey: outside this person's working hours (person filter active)
+  if (slot.personStatus === 'not_working') {
+    return (
+      <button
+        onClick={onClick}
+        className="w-full text-left rounded-lg bg-gray-50 px-3 py-2.5 text-sm text-gray-400 hover:bg-gray-100 active:bg-gray-200 transition cursor-pointer"
+      >
+        {slot.start} – {slot.end}
+      </button>
+    );
+  }
+
   if (slot.available) {
     return (
       <button

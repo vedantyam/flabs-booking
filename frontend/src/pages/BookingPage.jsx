@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import CalendarGrid from '../components/CalendarGrid.jsx';
 import SlotCell from '../components/SlotCell.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+const INTERVAL = 30000;
+const BACKOFF = 5000;
 
 function getTodayStr() {
   return new Date().toISOString().split('T')[0];
@@ -35,19 +37,76 @@ export default function BookingPage() {
   const [error, setError] = useState('');
   const [mobileView, setMobileView] = useState('calendar');
 
+  // Person filter
+  const [persons, setPersons] = useState([]);
+  const [selectedPersonId, setSelectedPersonId] = useState('');
+
   // Slot detail modal state
   const [detailModal, setDetailModal] = useState(null);
-  // detailModal shape: { slot: { start, end }, loading: bool, persons: [], error: '' }
 
+  // Refs for smart polling (values must be readable inside RAF callback)
+  const timeToMakeNextRequestRef = useRef(0);
+  const failedTriesRef = useRef(0);
+  const selectedPersonIdRef = useRef('');
+  const rafIdRef = useRef(null);
+
+  // Keep personId ref in sync
   useEffect(() => {
-    setLoading(true);
-    setError('');
-    axios
-      .get(`${API_URL}/api/slots/week?start=${today}`)
-      .then(res => setWeekData(res.data.week || []))
-      .catch(() => setError('Failed to load slots. Please try again.'))
-      .finally(() => setLoading(false));
+    selectedPersonIdRef.current = selectedPersonId;
+    // Trigger an immediate re-fetch when person filter changes
+    timeToMakeNextRequestRef.current = 0;
+  }, [selectedPersonId]);
+
+  // Load person list once on mount
+  useEffect(() => {
+    axios.get(`${API_URL}/api/support-persons`)
+      .then(res => setPersons((res.data || []).filter(p => p.is_active)))
+      .catch(() => {});
   }, []);
+
+  // Smart polling: RAF + Page Visibility API + exponential backoff on failure
+  useEffect(() => {
+    async function fetchSlots() {
+      setLoading(true);
+      setError('');
+      try {
+        const pid = selectedPersonIdRef.current;
+        const params = { start: today };
+        if (pid) params.personId = pid;
+        const res = await axios.get(`${API_URL}/api/slots/week`, { params });
+        setWeekData(res.data.week || []);
+        failedTriesRef.current = 0;
+      } catch (e) {
+        failedTriesRef.current += 1;
+        setError('Failed to load slots. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function rafTimer(time) {
+      if (timeToMakeNextRequestRef.current <= time) {
+        await fetchSlots();
+        timeToMakeNextRequestRef.current =
+          time + INTERVAL + failedTriesRef.current * BACKOFF;
+      }
+      rafIdRef.current = requestAnimationFrame(rafTimer);
+    }
+
+    rafIdRef.current = requestAnimationFrame(rafTimer);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        timeToMakeNextRequestRef.current = 0;
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close modal on Escape key
   useEffect(() => {
@@ -70,12 +129,11 @@ export default function BookingPage() {
   }
 
   async function handleSlotClick(slot) {
-    // Open modal in loading state immediately
     setDetailModal({ slot, loading: true, persons: null, error: '' });
     try {
-      const res = await axios.get(`${API_URL}/api/slots/detail`, {
-        params: { date: selectedDate, start: slot.start, end: slot.end },
-      });
+      const params = { date: selectedDate, start: slot.start, end: slot.end };
+      if (selectedPersonId) params.personId = selectedPersonId;
+      const res = await axios.get(`${API_URL}/api/slots/detail`, { params });
       setDetailModal({ slot, loading: false, persons: res.data, error: '' });
     } catch {
       setDetailModal(prev =>
@@ -127,12 +185,37 @@ export default function BookingPage() {
             </button>
           </div>
 
-          {/* Date heading */}
+          {/* Date heading + person filter */}
           <div className="flex-shrink-0 px-6 pt-5 pb-4 border-b border-gray-100">
-            <h2 className="text-base font-semibold text-gray-800">
-              {selectedDate ? formatSelectedDate(selectedDate) : 'Select a date'}
-            </h2>
-            <p className="text-xs text-gray-400 mt-0.5">30-minute slots · click any slot to see who's free</p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-gray-800">
+                  {selectedDate ? formatSelectedDate(selectedDate) : 'Select a date'}
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">30-minute slots · click any slot to see who's free</p>
+              </div>
+
+              {/* Person filter dropdown */}
+              {persons.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <label htmlFor="person-filter" className="text-xs text-gray-500 whitespace-nowrap">
+                    View availability for:
+                  </label>
+                  <select
+                    id="person-filter"
+                    value={selectedPersonId}
+                    onChange={e => setSelectedPersonId(e.target.value)}
+                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">All Team</option>
+                    <hr />
+                    {persons.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Slot grid */}
@@ -168,6 +251,12 @@ export default function BookingPage() {
                     <span className="w-3 h-3 rounded-sm bg-red-100 inline-block" />
                     Booked
                   </span>
+                  {selectedPersonId && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-sm bg-gray-100 inline-block" />
+                      Not working
+                    </span>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
@@ -215,7 +304,7 @@ export default function BookingPage() {
               <p className="text-sm text-red-500 py-2">{detailModal.error}</p>
             )}
 
-            {/* Person rows — one per person, no scroll */}
+            {/* Person rows */}
             {!detailModal.loading && !detailModal.error && detailModal.persons && (
               <div className="space-y-2.5">
                 {detailModal.persons.map(p => (

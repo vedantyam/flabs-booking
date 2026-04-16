@@ -32,9 +32,10 @@ function getCalendarClient() {
   return google.calendar({ version: 'v3', auth });
 }
 
-// Returns busy periods per email for a given UTC time range
+// Returns busy periods per email for a given IST time range
+// timeMinIST / timeMaxIST must be ISO strings with +05:30 offset, e.g. "2024-01-15T00:00:00.000+05:30"
 // gcalBusy[email] = [{ start: 'HH:MM', end: 'HH:MM' }, ...]  (in IST HH:MM)
-async function getFreeBusy(persons, timeMinUTC, timeMaxUTC) {
+async function getFreeBusy(persons, timeMinIST, timeMaxIST) {
   const calendar = getCalendarClient();
 
   const emails = [...new Set(persons.map(p => p.email).filter(Boolean))];
@@ -42,10 +43,15 @@ async function getFreeBusy(persons, timeMinUTC, timeMaxUTC) {
 
   const response = await calendar.freebusy.query({
     requestBody: {
-      timeMin: timeMinUTC,
-      timeMax: timeMaxUTC,
+      timeMin: timeMinIST,
+      timeMax: timeMaxIST,
       timeZone: TIMEZONE,
-      items: emails.map(email => ({ id: email })),
+      items: emails.map(email => ({ id: email, calendarId: email })),
+    },
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'X-Request-Timestamp': String(Date.now()),
     },
   });
 

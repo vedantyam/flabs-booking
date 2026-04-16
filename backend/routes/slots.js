@@ -1,7 +1,7 @@
 const express = require('express');
 const { DateTime } = require('luxon');
 const { createClient } = require('@supabase/supabase-js');
-const { getDaySlotsWithAvailability, timeToMinutes, normalizeTime, toUTCISO } = require('../services/slotLogic');
+const { getDaySlotsWithAvailability, timeToMinutes, normalizeTime, toIST_ISO } = require('../services/slotLogic');
 const gcalService = require('../services/googleCalendar');
 
 const router = express.Router();
@@ -19,26 +19,26 @@ function isValidDate(dateStr) {
   return dt.isValid;
 }
 
-// GET /api/slots?date=YYYY-MM-DD
+// GET /api/slots?date=YYYY-MM-DD[&personId=uuid]
 router.get('/', async (req, res, next) => {
   try {
-    const { date } = req.query;
+    const { date, personId } = req.query;
     if (!date || !isValidDate(date)) {
       return res.status(400).json({ error: 'Invalid or missing date parameter (YYYY-MM-DD)' });
     }
 
     const supabase = getSupabase();
-    const slots = await getDaySlotsWithAvailability(date, supabase, gcalService);
+    const slots = await getDaySlotsWithAvailability(date, supabase, gcalService, personId || null);
     res.json({ date, slots });
   } catch (err) {
     next(err);
   }
 });
 
-// GET /api/slots/week?start=YYYY-MM-DD
+// GET /api/slots/week?start=YYYY-MM-DD[&personId=uuid]
 router.get('/week', async (req, res, next) => {
   try {
-    const { start } = req.query;
+    const { start, personId } = req.query;
     if (!start || !isValidDate(start)) {
       return res.status(400).json({ error: 'Invalid or missing start parameter (YYYY-MM-DD)' });
     }
@@ -50,7 +50,7 @@ router.get('/week', async (req, res, next) => {
     const weekData = await Promise.all(
       Array.from({ length: 7 }, (_, i) => {
         const dateStr = startDT.plus({ days: i }).toISODate();
-        return getDaySlotsWithAvailability(dateStr, supabase, gcalService).then(slots => ({
+        return getDaySlotsWithAvailability(dateStr, supabase, gcalService, personId || null).then(slots => ({
           date: dateStr,
           slots,
         }));
@@ -63,23 +63,26 @@ router.get('/week', async (req, res, next) => {
   }
 });
 
-// GET /api/slots/detail?date=YYYY-MM-DD&start=HH:MM&end=HH:MM
+// GET /api/slots/detail?date=YYYY-MM-DD&start=HH:MM&end=HH:MM[&personId=uuid]
 // Returns each active support person's status for that specific slot
 router.get('/detail', async (req, res, next) => {
   try {
-    const { date, start, end } = req.query;
+    const { date, start, end, personId } = req.query;
     if (!date || !isValidDate(date) || !start || !end) {
       return res.status(400).json({ error: 'date, start, and end are required' });
     }
 
     const supabase = getSupabase();
 
-    // Active support persons
-    const { data: persons, error: personsError } = await supabase
+    // Active support persons (optionally filtered to one person)
+    let { data: allPersons, error: personsError } = await supabase
       .from('support_persons')
       .select('*')
       .eq('is_active', true);
     if (personsError) throw personsError;
+    const persons = personId
+      ? (allPersons || []).filter(p => p.id === personId)
+      : (allPersons || []);
 
     // WO days for this date
     const { data: woDays, error: woError } = await supabase
@@ -96,13 +99,13 @@ router.get('/detail', async (req, res, next) => {
       .eq('date', date);
     if (bookingsError) throw bookingsError;
 
-    // Google Calendar freebusy (best-effort)
+    // Google Calendar freebusy — always fresh, use IST ISO strings
     let gcalBusy = {};
     if (persons && persons.length > 0) {
       try {
-        const dayStartUTC = toUTCISO(date, '00:00');
-        const dayEndUTC   = toUTCISO(date, '23:59');
-        gcalBusy = await gcalService.getFreeBusy(persons, dayStartUTC, dayEndUTC);
+        const dayStartIST = toIST_ISO(date, '00:00');
+        const dayEndIST   = toIST_ISO(date, '23:59');
+        gcalBusy = await gcalService.getFreeBusy(persons, dayStartIST, dayEndIST);
       } catch (err) {
         console.error('Google Calendar freebusy error:', err.message);
       }

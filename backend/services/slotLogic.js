@@ -77,6 +77,20 @@ function toUTCISO(dateStr, timeStr) {
   return DateTime.fromISO(`${dateStr}T${timeStr}:00`, { zone: TIMEZONE }).toUTC().toISO();
 }
 
+// Convert IST date + time to IST ISO string with +05:30 offset for Google Calendar freebusy
+function toIST_ISO(dateStr, timeStr) {
+  return DateTime.fromISO(`${dateStr}T${timeStr}:00`, { zone: TIMEZONE }).toISO();
+}
+
+// Check if a slot falls within a person's working hours (ignores breaks)
+function isPersonInWorkingHours(person, slotStart, slotEnd) {
+  const slotStartMin = timeToMinutes(slotStart);
+  const slotEndMin = timeToMinutes(slotEnd);
+  const workStart = timeToMinutes(person.work_start);
+  const workEnd = timeToMinutes(person.work_end);
+  return slotStartMin >= workStart && slotEndMin <= workEnd;
+}
+
 // Get free persons for a slot given persons list, WO set, bookings, and GCal busy data
 function getFreePersonsForSlot(persons, slotStart, slotEnd, woPersonIds, bookings, gcalBusy) {
   return persons.filter(person => {
@@ -107,13 +121,18 @@ function getFreePersonsForSlot(persons, slotStart, slotEnd, woPersonIds, booking
   });
 }
 
-async function getDaySlotsWithAvailability(dateStr, supabase, gcalService) {
+async function getDaySlotsWithAvailability(dateStr, supabase, gcalService, personId = null) {
   // Get active support persons
-  const { data: persons, error: personsError } = await supabase
+  let { data: allPersons, error: personsError } = await supabase
     .from('support_persons')
     .select('*')
     .eq('is_active', true);
   if (personsError) throw personsError;
+
+  // If personId filter, narrow to just that person
+  const persons = personId
+    ? (allPersons || []).filter(p => p.id === personId)
+    : (allPersons || []);
 
   // Get WO days for this date
   const { data: woDays, error: woError } = await supabase
@@ -123,20 +142,21 @@ async function getDaySlotsWithAvailability(dateStr, supabase, gcalService) {
   if (woError) throw woError;
   const woPersonIds = new Set((woDays || []).map(w => w.support_person_id));
 
-  // Get bookings for this date
+  // Get bookings for this date — cross-check Supabase even if GCal is stale
   const { data: bookings, error: bookingsError } = await supabase
     .from('bookings')
     .select('*')
     .eq('date', dateStr);
   if (bookingsError) throw bookingsError;
 
-  // Get Google Calendar freebusy for the day
+  // Get Google Calendar freebusy for the day — always fetch fresh, no cache
   let gcalBusy = {};
-  if (gcalService && persons && persons.length > 0) {
+  if (gcalService && persons.length > 0) {
     try {
-      const dayStartUTC = toUTCISO(dateStr, '00:00');
-      const dayEndUTC = toUTCISO(dateStr, '23:59');
-      gcalBusy = await gcalService.getFreeBusy(persons, dayStartUTC, dayEndUTC);
+      // Use IST ISO strings with +05:30 offset (not UTC) for accurate day boundaries
+      const dayStartIST = toIST_ISO(dateStr, '00:00');
+      const dayEndIST = toIST_ISO(dateStr, '23:59');
+      gcalBusy = await gcalService.getFreeBusy(persons, dayStartIST, dayEndIST);
     } catch (err) {
       console.error('Google Calendar freebusy error:', err.message);
     }
@@ -146,7 +166,7 @@ async function getDaySlotsWithAvailability(dateStr, supabase, gcalService) {
 
   return slots.map(slot => {
     const freePersons = getFreePersonsForSlot(
-      persons || [],
+      persons,
       slot.start,
       slot.end,
       woPersonIds,
@@ -154,13 +174,25 @@ async function getDaySlotsWithAvailability(dateStr, supabase, gcalService) {
       gcalBusy
     );
 
-    return {
+    const base = {
       date: dateStr,
       start: slot.start,
       end: slot.end,
       available: freePersons.length > 0,
       freeCount: freePersons.length,
     };
+
+    // Single-person mode: include personStatus so frontend can show grey for not_working
+    if (personId) {
+      const person = persons[0];
+      let personStatus = 'not_working';
+      if (person && isPersonInWorkingHours(person, slot.start, slot.end)) {
+        personStatus = freePersons.length > 0 ? 'free' : 'busy';
+      }
+      return { ...base, personStatus };
+    }
+
+    return base;
   });
 }
 
@@ -169,8 +201,10 @@ module.exports = {
   getDaySlotsWithAvailability,
   getFreePersonsForSlot,
   isPersonScheduledForSlot,
+  isPersonInWorkingHours,
   isPersonOnBreak,
   toUTCISO,
+  toIST_ISO,
   timeToMinutes,
   normalizeTime,
 };

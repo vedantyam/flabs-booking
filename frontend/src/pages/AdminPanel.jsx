@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BookingsList from '../components/BookingsList.jsx';
 import SupportPersonManager from '../components/SupportPersonManager.jsx';
+import DayView from '../components/DayView.jsx';
 
 const TABS = [
   { id: 'calendar', label: 'Calendar View' },
@@ -66,19 +67,7 @@ export default function AdminPanel() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
 
         {/* Tab 1 — Calendar View */}
-        {activeTab === 'calendar' && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            <iframe
-              src="https://calendar.google.com/calendar/embed?src=support%40flabs.in&src=kajalkaushik9546%40gmail.com&src=milkyflabs%40gmail.com&src=project.kajal2015%40gmail.com&src=tannusharma6923%40gmail.com&ctz=Asia%2FKolkata&mode=DAY&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=0&showCalendars=1&showTz=0"
-              style={{ border: 0 }}
-              width="100%"
-              height="650"
-              frameBorder="0"
-              scrolling="no"
-              title="Support team calendar"
-            />
-          </div>
-        )}
+        {activeTab === 'calendar' && <DayView />}
 
         {/* Tab 2 — Support Team */}
         {activeTab === 'team' && (

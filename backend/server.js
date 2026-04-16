@@ -7,6 +7,7 @@ const bookingsRouter = require('./routes/bookings');
 const supportPersonsRouter = require('./routes/supportPersons');
 const woDaysRouter = require('./routes/woDays');
 const adminRouter = require('./routes/admin');
+const calendarRouter = require('./routes/calendar');
 
 const app = express();
 
@@ -33,6 +34,7 @@ app.use('/api/book', bookingsRouter); // alias for POST /api/book
 app.use('/api/support-persons', supportPersonsRouter);
 app.use('/api/wo-days', woDaysRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/calendar', calendarRouter);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

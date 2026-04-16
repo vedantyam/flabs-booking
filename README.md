@@ -92,10 +92,10 @@ Then seed the support team:
 
 ```sql
 insert into support_persons (name, email, work_start, work_end, lunch_start, lunch_end, tea_start, tea_end) values
-  ('Tannu Sharma',  'veppy246@gmail.com', '10:00', '18:00', '13:00', '14:00', '16:30', '17:30'),
-  ('Milky Gupta',   'veppy246@gmail.com', '10:00', '18:00', '13:00', '14:00', '16:30', '17:30'),
-  ('Kajal Kaushik', 'veppy246@gmail.com', '10:00', '18:00', '13:00', '14:00', '16:30', '17:30'),
-  ('Kajal Gupta',   'veppy246@gmail.com', '12:00', '20:00', '16:00', '17:00', null, null);
+  ('Tannu Sharma',  'tannusharma6923@gmail.com', '10:00', '18:00', '13:00', '14:00', '16:30', '17:30'),
+  ('Milky Gupta',   'milkyflabs@gmail.com',     '10:00', '18:00', '13:00', '14:00', '16:30', '17:30'),
+  ('Kajal Kaushik', 'kajalkaushik9546@gmail.com','10:00', '18:00', '13:00', '14:00', '16:30', '17:30'),
+  ('Kajal Gupta',   'project.kajal2015@gmail.com','12:00', '20:00', '16:00', '17:00', null, null);
 ```
 
 ### 3. Google Calendar — Service Account setup

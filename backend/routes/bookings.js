@@ -4,7 +4,7 @@ const { requireAuth } = require('../middleware/auth');
 const {
   getFreePersonsForSlot,
   isPersonScheduledForSlot,
-  toUTCISO,
+  toIST_ISO,
 } = require('../services/slotLogic');
 const { pickAssignee } = require('../services/roundRobin');
 const gcalService = require('../services/googleCalendar');
@@ -56,9 +56,9 @@ router.post('/', async (req, res, next) => {
     let gcalBusy = {};
     if (persons && persons.length > 0) {
       try {
-        const startUTC = toUTCISO(date, slot_start);
-        const endUTC = toUTCISO(date, slot_end);
-        gcalBusy = await gcalService.getFreeBusy(persons, startUTC, endUTC);
+        const startIST = toIST_ISO(date, slot_start);
+        const endIST = toIST_ISO(date, slot_end);
+        gcalBusy = await gcalService.getFreeBusy(persons, startIST, endIST);
       } catch (err) {
         console.error('GCal freebusy error during booking:', err.message);
       }

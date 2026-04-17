@@ -4,7 +4,7 @@ import CalendarGrid from '../components/CalendarGrid.jsx';
 import SlotCell from '../components/SlotCell.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
-const INTERVAL = 30000;
+const POLL_INTERVAL = 30000;
 const BACKOFF = 5000;
 
 function getTodayStr() {
@@ -32,41 +32,50 @@ function statusLabel(p) {
 export default function BookingPage() {
   const today = getTodayStr();
   const [selectedDate, setSelectedDate] = useState(today);
-  const [weekData, setWeekData] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [slotCache, setSlotCache] = useState({}); // { [dateStr]: slots[] }
+  const [loadingDate, setLoadingDate] = useState(null);
   const [error, setError] = useState('');
   const [mobileView, setMobileView] = useState('calendar');
-
-  // Slot detail modal state
   const [detailModal, setDetailModal] = useState(null);
 
-  // Refs for smart polling (values must be readable inside RAF callback)
-  const timeToMakeNextRequestRef = useRef(0);
+  // Refs so RAF/interval callbacks always see current values without re-registering
+  const slotCacheRef = useRef({});
+  const selectedDateRef = useRef(today);
+  const fetchInProgressRef = useRef(new Set());
   const failedTriesRef = useRef(0);
+  const timeToNextFetchRef = useRef(0);
   const rafIdRef = useRef(null);
 
-  // Smart polling: RAF + Page Visibility API + exponential backoff on failure
-  useEffect(() => {
-    async function fetchSlots() {
-      setLoading(true);
-      setError('');
-      try {
-        const res = await axios.get(`${API_URL}/api/slots/week`, { params: { start: today } });
-        setWeekData(res.data.week || []);
-        failedTriesRef.current = 0;
-      } catch (e) {
-        failedTriesRef.current += 1;
-        setError('Failed to load slots. Please try again.');
-      } finally {
-        setLoading(false);
-      }
+  async function fetchDate(dateStr, force = false) {
+    if (!force && slotCacheRef.current[dateStr]) return; // already cached
+    if (fetchInProgressRef.current.has(dateStr)) return; // already in flight
+
+    fetchInProgressRef.current.add(dateStr);
+    setLoadingDate(dateStr);
+    setError('');
+    try {
+      const res = await axios.get(`${API_URL}/api/slots`, { params: { date: dateStr } });
+      slotCacheRef.current[dateStr] = res.data.slots || [];
+      setSlotCache({ ...slotCacheRef.current });
+      failedTriesRef.current = 0;
+    } catch (e) {
+      failedTriesRef.current += 1;
+      setError('Failed to load slots. Please try again.');
+    } finally {
+      fetchInProgressRef.current.delete(dateStr);
+      setLoadingDate(null);
     }
+  }
+
+  // On mount: fetch today + set up RAF polling of selected date
+  useEffect(() => {
+    fetchDate(today);
 
     async function rafTimer(time) {
-      if (timeToMakeNextRequestRef.current <= time) {
-        await fetchSlots();
-        timeToMakeNextRequestRef.current =
-          time + INTERVAL + failedTriesRef.current * BACKOFF;
+      if (timeToNextFetchRef.current <= time) {
+        await fetchDate(selectedDateRef.current, true);
+        timeToNextFetchRef.current =
+          time + POLL_INTERVAL + failedTriesRef.current * BACKOFF;
       }
       rafIdRef.current = requestAnimationFrame(rafTimer);
     }
@@ -75,7 +84,7 @@ export default function BookingPage() {
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        timeToMakeNextRequestRef.current = 0;
+        timeToNextFetchRef.current = 0; // force immediate refresh when tab regains focus
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -96,14 +105,12 @@ export default function BookingPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [detailModal]);
 
-  function getSlotsForDate(dateStr) {
-    const dayData = weekData.find(d => d.date === dateStr);
-    return dayData?.slots || [];
-  }
-
   function handleDateSelect(dateStr) {
+    selectedDateRef.current = dateStr;
     setSelectedDate(dateStr);
     setMobileView('slots');
+    // Fetch if not yet cached (force=false → skips if already have data)
+    fetchDate(dateStr, false);
   }
 
   async function handleSlotClick(slot) {
@@ -120,7 +127,10 @@ export default function BookingPage() {
     }
   }
 
-  const slots = getSlotsForDate(selectedDate).filter(s => !s.allNotWorking);
+  const slots = slotCache[selectedDate] || [];
+  const isLoading = loadingDate === selectedDate;
+  // Show "no demos after 8pm" banner when the day extends to 8pm (last slot ends at 20:00+)
+  const showAfterEightBanner = slots.length > 0 && slots[slots.length - 1].end >= '20:00';
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
@@ -173,26 +183,26 @@ export default function BookingPage() {
 
           {/* Slot grid */}
           <div className="flex-1 overflow-y-auto px-6 py-5">
-            {loading && (
+            {isLoading && (
               <div className="flex items-center justify-center gap-2 text-gray-400 mt-10">
                 <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                 <span className="text-sm">Loading slots…</span>
               </div>
             )}
 
-            {error && (
+            {!isLoading && error && (
               <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
                 {error}
               </div>
             )}
 
-            {!loading && !error && slots.length === 0 && (
+            {!isLoading && !error && slots.length === 0 && (
               <p className="text-sm text-gray-400 text-center mt-10">
                 No slots for this date.
               </p>
             )}
 
-            {!loading && slots.length > 0 && (
+            {!isLoading && slots.length > 0 && (
               <>
                 {/* Legend */}
                 <div className="flex gap-4 mb-4 text-xs text-gray-400">
@@ -215,6 +225,13 @@ export default function BookingPage() {
                     />
                   ))}
                 </div>
+
+                {showAfterEightBanner && (
+                  <div className="col-span-full mt-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-500">
+                    <span>🚫</span>
+                    <span>No demos available after 8:00 PM</span>
+                  </div>
+                )}
               </>
             )}
           </div>

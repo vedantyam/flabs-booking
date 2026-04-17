@@ -122,35 +122,27 @@ function getFreePersonsForSlot(persons, slotStart, slotEnd, woPersonIds, booking
 }
 
 async function getDaySlotsWithAvailability(dateStr, supabase, gcalService, personId = null) {
-  // Get active support persons
-  let { data: allPersons, error: personsError } = await supabase
-    .from('support_persons')
-    .select('*')
-    .eq('is_active', true);
-  if (personsError) throw personsError;
+  // Fetch persons, WO days, and bookings in parallel — saves ~2 round-trips vs sequential
+  const [personsResult, woDaysResult, bookingsResult] = await Promise.all([
+    supabase.from('support_persons').select('*').eq('is_active', true),
+    supabase.from('wo_days').select('support_person_id').eq('date', dateStr),
+    supabase.from('bookings').select('*').eq('date', dateStr),
+  ]);
+
+  if (personsResult.error) throw personsResult.error;
+  if (woDaysResult.error) throw woDaysResult.error;
+  if (bookingsResult.error) throw bookingsResult.error;
 
   // If personId filter, narrow to just that person
   const persons = personId
-    ? (allPersons || []).filter(p => p.id === personId)
-    : (allPersons || []);
+    ? (personsResult.data || []).filter(p => p.id === personId)
+    : (personsResult.data || []);
 
-  // Get WO days for this date
-  const { data: woDays, error: woError } = await supabase
-    .from('wo_days')
-    .select('support_person_id')
-    .eq('date', dateStr);
-  if (woError) throw woError;
-  const woPersonIds = new Set((woDays || []).map(w => w.support_person_id));
+  const woPersonIds = new Set((woDaysResult.data || []).map(w => w.support_person_id));
+  const bookings = bookingsResult.data || [];
 
-  // Get bookings for this date — cross-check Supabase even if GCal is stale
-  const { data: bookings, error: bookingsError } = await supabase
-    .from('bookings')
-    .select('*')
-    .eq('date', dateStr);
-  if (bookingsError) throw bookingsError;
-
-  // Get Google Calendar busy periods via events.list per person (same approach as calendar/day).
-  // freebusy.query silently returns empty for calendars not shared with the service account.
+  // Get Google Calendar busy periods via events.list per person.
+  // getPersonsBusy internally fetches all persons in parallel via Promise.all.
   let gcalBusy = {};
   if (gcalService && persons.length > 0) {
     try {

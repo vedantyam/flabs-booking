@@ -48,6 +48,12 @@ function fmtDateObj(dt) {
   return `${y}-${m}-${d}`;
 }
 
+function fmtDisplay(dateStr) {
+  if (!dateStr) return '—';
+  const [y, m, d] = dateStr.split('-');
+  return `${d} - ${m} - ${y}`;
+}
+
 function getNext7DaysRange(todayStr) {
   const [y, m, d] = todayStr.split('-').map(Number);
   return {
@@ -382,39 +388,49 @@ export default function SupportPersonManager() {
             <div>
               <p className="text-xs font-medium text-gray-500 mb-2">Quick options</p>
               <div className="flex gap-2">
-                <button
-                  onClick={() => setDateModal(d => ({
-                    ...d,
-                    fromDate: today, toDate: today,
-                    quickOption: 'today',
-                    calKey: (d.calKey || 0) + 1,
-                  }))}
-                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
-                    dateModal.quickOption === 'today'
-                      ? 'bg-blue-600 border-blue-600 text-white'
-                      : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  Today only
-                </button>
-                <button
-                  onClick={() => {
-                    const r = getNext7DaysRange(today);
-                    setDateModal(d => ({
+                <div className="relative group">
+                  <button
+                    onClick={() => setDateModal(d => ({
                       ...d,
-                      fromDate: r.from, toDate: r.to,
-                      quickOption: 'next7',
+                      fromDate: today, toDate: today,
+                      quickOption: 'today',
                       calKey: (d.calKey || 0) + 1,
-                    }));
-                  }}
-                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
-                    dateModal.quickOption === 'next7'
-                      ? 'bg-blue-600 border-blue-600 text-white'
-                      : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  Next 7 days
-                </button>
+                    }))}
+                    className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
+                      dateModal.quickOption === 'today'
+                        ? 'bg-blue-600 border-blue-600 text-white'
+                        : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    Today only
+                  </button>
+                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap rounded bg-gray-800 px-2 py-0.5 text-[10px] text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    {fmtDisplay(today)}
+                  </span>
+                </div>
+                <div className="relative group">
+                  <button
+                    onClick={() => {
+                      const r = getNext7DaysRange(today);
+                      setDateModal(d => ({
+                        ...d,
+                        fromDate: r.from, toDate: r.to,
+                        quickOption: 'next7',
+                        calKey: (d.calKey || 0) + 1,
+                      }));
+                    }}
+                    className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
+                      dateModal.quickOption === 'next7'
+                        ? 'bg-blue-600 border-blue-600 text-white'
+                        : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    Next 7 days
+                  </button>
+                  <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap rounded bg-gray-800 px-2 py-0.5 text-[10px] text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    {fmtDisplay(today)} → {fmtDisplay(getNext7DaysRange(today).to)}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -502,8 +518,8 @@ function MiniCalendar({ fromDate, toDate, onChange }) {
       {/* From / To toggle pills */}
       <div className="grid grid-cols-2 gap-px bg-gray-200">
         {[
-          { key: 'from', label: 'From', value: fromDate },
-          { key: 'to',   label: 'To',   value: toDate },
+          { key: 'from', label: 'Start Date', value: fromDate },
+          { key: 'to',   label: 'End Date',   value: toDate },
         ].map(({ key, label, value }) => (
           <button
             key={key}
@@ -517,9 +533,13 @@ function MiniCalendar({ fromDate, toDate, onChange }) {
             <span className={`block text-[10px] font-medium leading-none mb-0.5 ${
               picking === key ? 'text-blue-200' : 'text-gray-400'
             }`}>{label}</span>
-            <span className="text-xs font-semibold">{value || '—'}</span>
+            <span className="text-xs font-semibold">{fmtDisplay(value)}</span>
           </button>
         ))}
+      </div>
+
+      <div className="px-3 pt-1.5 pb-0">
+        <p className="text-[10px] text-gray-400 text-center">Click start date, then end date</p>
       </div>
 
       <div className="p-3">

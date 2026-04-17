@@ -60,7 +60,8 @@ export default function DayView() {
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [nowY, setNowY]           = useState(null);
-  const [opacity, setOpacity]     = useState(1);
+  const [visible, setVisible]     = useState(true);
+  const [slideDir, setSlideDir]   = useState(null); // 'left' | 'right'
   const [personFilter, setPersonFilter] = useState(''); // '' = All Team
   const scrollRef                 = useRef(null);
 
@@ -106,13 +107,15 @@ export default function DayView() {
     setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollTo; }, 80);
   }, [date]);
 
-  // ── Navigation with fade transition ─────────────────────────────────────────
+  // ── Navigation with slide+fade transition ────────────────────────────────────
   function navigateTo(newDate) {
     if (newDate === date) return;
-    setOpacity(0);
+    const dir = newDate > date ? 'left' : 'right';
+    setSlideDir(dir);
+    setVisible(false);
     setTimeout(() => {
       setDate(newDate);
-      setOpacity(1);
+      setVisible(true);
     }, 150);
   }
 
@@ -180,10 +183,14 @@ export default function DayView() {
         </div>
       )}
 
-      {/* ── Content area (fades on day navigation) ── */}
+      {/* ── Content area (slides + fades on day navigation) ── */}
       <div
         className="flex flex-col flex-1 overflow-hidden"
-        style={{ opacity, transition: 'opacity 0.15s ease' }}
+        style={{
+          opacity: visible ? 1 : 0,
+          transform: visible ? 'translateX(0)' : slideDir === 'left' ? 'translateX(-20px)' : 'translateX(20px)',
+          transition: 'opacity 0.15s ease, transform 0.15s ease',
+        }}
       >
         {/* Sticky person-name header */}
         <div className="flex flex-shrink-0 bg-white border-b border-gray-100 shadow-sm">

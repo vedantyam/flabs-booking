@@ -114,6 +114,11 @@ export default function BookingPage() {
   }
 
   async function handleSlotClick(slot) {
+    // Use personStatuses already in slot data for instant display (no extra API call)
+    if (slot.personStatuses && slot.personStatuses.length > 0) {
+      setDetailModal({ slot, loading: false, persons: slot.personStatuses, error: '' });
+      return;
+    }
     setDetailModal({ slot, loading: true, persons: null, error: '' });
     try {
       const res = await axios.get(`${API_URL}/api/slots/detail`, {

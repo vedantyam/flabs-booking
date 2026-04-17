@@ -91,6 +91,41 @@ function isPersonInWorkingHours(person, slotStart, slotEnd) {
   return slotStartMin >= workStart && slotEndMin <= workEnd;
 }
 
+// Full status for a single person in a single slot — matches /api/slots/detail response shape
+function getPersonSlotStatus(person, slotStart, slotEnd, woPersonIds, bookings, gcalBusy) {
+  const ssMin = timeToMinutes(slotStart);
+  const seMin = timeToMinutes(slotEnd);
+  const wsMin = timeToMinutes(person.work_start);
+  const weMin = timeToMinutes(person.work_end);
+
+  if (ssMin < wsMin || seMin > weMin) {
+    return { status: 'not_working', reason: 'outside working hours' };
+  }
+  if (woPersonIds.has(person.id)) {
+    return { status: 'busy', reason: 'day off' };
+  }
+  if (person.lunch_start && person.lunch_end) {
+    if (ssMin < timeToMinutes(person.lunch_end) && seMin > timeToMinutes(person.lunch_start)) {
+      return { status: 'busy', reason: 'lunch break' };
+    }
+  }
+  if (person.tea_start && person.tea_end) {
+    if (ssMin < timeToMinutes(person.tea_end) && seMin > timeToMinutes(person.tea_start)) {
+      return { status: 'busy', reason: 'tea break' };
+    }
+  }
+  const hasBooking = bookings.some(b =>
+    b.support_person_id === person.id &&
+    normalizeTime(b.slot_start) < slotEnd &&
+    normalizeTime(b.slot_end) > slotStart
+  );
+  if (hasBooking) return { status: 'busy', reason: 'existing booking' };
+  if (gcalBusy?.[person.email]?.some(b => b.start < slotEnd && b.end > slotStart)) {
+    return { status: 'busy', reason: 'calendar event' };
+  }
+  return { status: 'free' };
+}
+
 // Get free persons for a slot given persons list, WO set, bookings, and GCal busy data
 function getFreePersonsForSlot(persons, slotStart, slotEnd, woPersonIds, bookings, gcalBusy) {
   return persons.filter(person => {
@@ -164,32 +199,13 @@ async function getDaySlotsWithAvailability(dateStr, supabase, gcalService, perso
       gcalBusy
     );
 
-    // Log per-person status for each slot so Vercel logs show exactly what's happening
-    persons.forEach(person => {
-      const isFree = freePersons.some(p => p.id === person.id);
-      let status;
-      if (!isPersonScheduledForSlot(person, slot.start, slot.end)) {
-        status = 'not_working';
-      } else if (woPersonIds.has(person.id)) {
-        status = 'wo_day';
-      } else if ((bookings || []).some(b =>
-        b.support_person_id === person.id &&
-        normalizeTime(b.slot_start) < slot.end &&
-        normalizeTime(b.slot_end) > slot.start
-      )) {
-        status = 'booked';
-      } else if (gcalBusy[person.email] && gcalBusy[person.email].some(busy =>
-        busy.start < slot.end && busy.end > slot.start
-      )) {
-        status = 'gcal_busy';
-      } else {
-        status = isFree ? 'free' : 'unknown';
-      }
-      console.log('[SLOTS] Slot', slot.start, '-', slot.end, 'status for', person.name, ':', status);
-    });
-
-    // Hide slots where no person's schedule covers this time (e.g. after Kajal's 8pm cutoff)
     const anyScheduled = persons.some(p => isPersonScheduledForSlot(p, slot.start, slot.end));
+
+    // Build per-person statuses so frontend can show instant slot detail without a second API call
+    const personStatuses = persons.map(person => ({
+      name: person.name,
+      ...getPersonSlotStatus(person, slot.start, slot.end, woPersonIds, bookings || [], gcalBusy),
+    }));
 
     const base = {
       date: dateStr,
@@ -198,6 +214,7 @@ async function getDaySlotsWithAvailability(dateStr, supabase, gcalService, perso
       available: freePersons.length > 0,
       freeCount: freePersons.length,
       allNotWorking: !anyScheduled,
+      personStatuses,
     };
 
     // Single-person mode: include personStatus so frontend can show grey for not_working

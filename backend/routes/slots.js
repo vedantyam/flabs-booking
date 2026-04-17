@@ -19,6 +19,33 @@ function isValidDate(dateStr) {
   return dt.isValid;
 }
 
+// Cache-aside: check slot_cache, return cached value if fresh, else fetch and store
+async function getCachedSlots(supabase, cacheKey, fetchFn) {
+  const now = new Date().toISOString();
+
+  // Non-blocking cleanup of expired entries (fire-and-forget)
+  supabase.from('slot_cache').delete().lt('expires_at', now).then(() => {}).catch(() => {});
+
+  const { data: cached } = await supabase
+    .from('slot_cache')
+    .select('payload')
+    .eq('cache_key', cacheKey)
+    .gt('expires_at', now)
+    .maybeSingle();
+
+  if (cached) return cached.payload;
+
+  const fresh = await fetchFn();
+
+  const expiresAt = new Date(Date.now() + 60_000).toISOString();
+  supabase
+    .from('slot_cache')
+    .upsert({ cache_key: cacheKey, payload: fresh, expires_at: expiresAt }, { onConflict: 'cache_key' })
+    .then(() => {}).catch(() => {});
+
+  return fresh;
+}
+
 // GET /api/slots?date=YYYY-MM-DD[&personId=uuid]
 router.get('/', async (req, res, next) => {
   try {
@@ -28,7 +55,10 @@ router.get('/', async (req, res, next) => {
     }
 
     const supabase = getSupabase();
-    const slots = await getDaySlotsWithAvailability(date, supabase, gcalService, personId || null);
+    const cacheKey = personId ? `slots:${date}:${personId}` : `slots:${date}`;
+    const slots = await getCachedSlots(supabase, cacheKey, () =>
+      getDaySlotsWithAvailability(date, supabase, gcalService, personId || null)
+    );
     res.json({ date, slots });
   } catch (err) {
     next(err);

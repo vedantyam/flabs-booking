@@ -120,7 +120,7 @@ export default function BookingPage() {
     }
   }
 
-  const slots = getSlotsForDate(selectedDate);
+  const slots = getSlotsForDate(selectedDate).filter(s => !s.allNotWorking);
 
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">

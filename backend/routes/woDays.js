@@ -59,6 +59,29 @@ router.post('/', requireAuth, async (req, res, next) => {
   }
 });
 
+// DELETE /api/wo-days/range — delete all WO days for a person over a date range (admin only)
+router.delete('/range', requireAuth, async (req, res, next) => {
+  try {
+    const supabase = getSupabase();
+    const { support_person_id, start_date, end_date } = req.body;
+
+    if (!support_person_id || !start_date || !end_date) {
+      return res.status(400).json({ error: 'support_person_id, start_date, and end_date are required' });
+    }
+
+    const { error } = await supabase
+      .from('wo_days')
+      .delete()
+      .eq('support_person_id', support_person_id)
+      .gte('date', start_date)
+      .lte('date', end_date);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /api/wo-days/:id — remove a WO day (admin only)
 router.delete('/:id', requireAuth, async (req, res, next) => {
   try {

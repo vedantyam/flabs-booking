@@ -196,12 +196,16 @@ async function getDaySlotsWithAvailability(dateStr, supabase, gcalService, perso
       console.log('[SLOTS] Slot', slot.start, '-', slot.end, 'status for', person.name, ':', status);
     });
 
+    // Hide slots where no person's schedule covers this time (e.g. after Kajal's 8pm cutoff)
+    const anyScheduled = persons.some(p => isPersonScheduledForSlot(p, slot.start, slot.end));
+
     const base = {
       date: dateStr,
       start: slot.start,
       end: slot.end,
       available: freePersons.length > 0,
       freeCount: freePersons.length,
+      allNotWorking: !anyScheduled,
     };
 
     // Single-person mode: include personStatus so frontend can show grey for not_working

@@ -26,6 +26,47 @@ function timeLabel(t) {
   return `${dh}:${m.toString().padStart(2, '0')} ${ampm}`;
 }
 
+function getDatesInRange(fromDate, toDate) {
+  const dates = [];
+  const [fy, fm, fd] = fromDate.split('-').map(Number);
+  const [ty, tm, td] = toDate.split('-').map(Number);
+  let current = new Date(fy, fm - 1, fd);
+  const end = new Date(ty, tm - 1, td);
+  while (current <= end) {
+    const y = current.getFullYear();
+    const m = String(current.getMonth() + 1).padStart(2, '0');
+    const d = String(current.getDate()).padStart(2, '0');
+    dates.push(`${y}-${m}-${d}`);
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
+}
+
+function fmtDate(dt) {
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getThisWeekRange(todayStr) {
+  const [y, m, d] = todayStr.split('-').map(Number);
+  const today = new Date(y, m - 1, d);
+  const dow = today.getDay();
+  const daysFromMonday = dow === 0 ? 6 : dow - 1;
+  const monday = new Date(y, m - 1, d - daysFromMonday);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return { from: fmtDate(monday), to: fmtDate(sunday) };
+}
+
+function getNext7DaysRange(todayStr) {
+  const [y, m, d] = todayStr.split('-').map(Number);
+  const start = new Date(y, m - 1, d);
+  const end = new Date(y, m - 1, d + 6);
+  return { from: fmtDate(start), to: fmtDate(end) };
+}
+
 const EMPTY_FORM = {
   name: '', email: '',
   work_start: '10:00', work_end: '18:00',
@@ -44,6 +85,9 @@ export default function SupportPersonManager() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(null);
+
+  // dateModal: null | { person, mode: 'absent'|'present', fromDate, toDate, saving }
+  const [dateModal, setDateModal] = useState(null);
 
   const today = getTodayStr();
 
@@ -71,25 +115,44 @@ export default function SupportPersonManager() {
     return wo ? wo.id : null;
   }
 
-  async function handleTogglePresence(person) {
-    const woId = getTodayWoId(person.id);
-    setToggling(person.id);
+  function handleStatusClick(person) {
+    const isAbsent = !!getTodayWoId(person.id);
+    if (isAbsent) {
+      setDateModal({ person, mode: 'present', fromDate: today, toDate: today, saving: false });
+    } else {
+      setDateModal({ person, mode: 'absent', fromDate: today, toDate: today, saving: false });
+    }
+  }
+
+  async function handleConfirmDateRange() {
+    const { person, mode, fromDate, toDate } = dateModal;
+    setDateModal(d => ({ ...d, saving: true }));
+
     try {
-      if (woId) {
-        await axios.delete(`${API_URL}/api/wo-days/${woId}`, { headers: authHeader() });
-        setTodayWoDays(w => w.filter(x => x.id !== woId));
+      if (mode === 'absent') {
+        const dates = getDatesInRange(fromDate, toDate);
+        for (const date of dates) {
+          try {
+            await axios.post(
+              `${API_URL}/api/wo-days`,
+              { support_person_id: person.id, date },
+              { headers: authHeader() }
+            );
+          } catch (err) {
+            if (err.response?.status !== 409) throw err; // ignore duplicates
+          }
+        }
       } else {
-        const res = await axios.post(
-          `${API_URL}/api/wo-days`,
-          { support_person_id: person.id, date: today },
-          { headers: authHeader() }
-        );
-        setTodayWoDays(w => [...w, res.data]);
+        await axios.delete(`${API_URL}/api/wo-days/range`, {
+          headers: authHeader(),
+          data: { support_person_id: person.id, start_date: fromDate, end_date: toDate },
+        });
       }
+      setDateModal(null);
+      await loadAll();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to update status');
-    } finally {
-      setToggling(null);
+      alert(err.response?.data?.error || `Failed to ${mode === 'absent' ? 'mark absent' : 'mark present'}`);
+      setDateModal(d => ({ ...d, saving: false }));
     }
   }
 
@@ -264,7 +327,7 @@ export default function SupportPersonManager() {
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => handleTogglePresence(person)}
+                        onClick={() => handleStatusClick(person)}
                         disabled={toggling === person.id}
                         title={isAbsent ? 'Click to mark Present' : 'Click to mark Absent'}
                         className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition disabled:opacity-50 ${
@@ -305,6 +368,102 @@ export default function SupportPersonManager() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Absent / Present date-range modal */}
+      {dateModal && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={() => !dateModal.saving && setDateModal(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-gray-800">
+              {dateModal.mode === 'absent'
+                ? `Mark ${dateModal.person.name} Absent`
+                : `Mark ${dateModal.person.name} Present`}
+            </h3>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">From</label>
+                <input
+                  type="date"
+                  value={dateModal.fromDate}
+                  onChange={e => setDateModal(d => ({ ...d, fromDate: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">To</label>
+                <input
+                  type="date"
+                  value={dateModal.toDate}
+                  min={dateModal.fromDate}
+                  onChange={e => setDateModal(d => ({ ...d, toDate: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">Quick options</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setDateModal(d => ({ ...d, fromDate: today, toDate: today }))}
+                  className="text-xs border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition"
+                >
+                  Today only
+                </button>
+                <button
+                  onClick={() => {
+                    const r = getThisWeekRange(today);
+                    setDateModal(d => ({ ...d, fromDate: r.from, toDate: r.to }));
+                  }}
+                  className="text-xs border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition"
+                >
+                  This week
+                </button>
+                <button
+                  onClick={() => {
+                    const r = getNext7DaysRange(today);
+                    setDateModal(d => ({ ...d, fromDate: r.from, toDate: r.to }));
+                  }}
+                  className="text-xs border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition"
+                >
+                  Next 7 days
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleConfirmDateRange}
+                disabled={dateModal.saving || !dateModal.fromDate || !dateModal.toDate}
+                className={`flex-1 text-sm px-4 py-2 rounded-lg font-medium transition disabled:opacity-50 ${
+                  dateModal.mode === 'absent'
+                    ? 'bg-red-600 text-white hover:bg-red-700'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
+              >
+                {dateModal.saving
+                  ? 'Saving…'
+                  : dateModal.mode === 'absent'
+                    ? 'Confirm Absent'
+                    : 'Confirm Present'}
+              </button>
+              <button
+                onClick={() => setDateModal(null)}
+                disabled={dateModal.saving}
+                className="border border-gray-300 text-gray-700 text-sm px-4 py-2 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -349,7 +508,7 @@ function BreakRow({ label, start, end, onStart, onEnd, onClear }) {
           onClick={onClear}
           className="text-xs text-gray-400 hover:text-red-500 transition ml-1"
         >
-          ✕ Clear
+          Clear
         </button>
       )}
     </div>

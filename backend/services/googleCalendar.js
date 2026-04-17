@@ -21,6 +21,7 @@ function getAuthClient() {
     scopes: [
       'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/tasks.readonly',
     ],
   });
 
@@ -32,7 +33,61 @@ function getCalendarClient() {
   return google.calendar({ version: 'v3', auth });
 }
 
+// Returns a JWT auth client that impersonates userEmail (domain-wide delegation required)
+function getTasksAuthForUser(userEmail) {
+  const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!keyJson) return null;
+
+  let key;
+  try {
+    key = JSON.parse(keyJson);
+  } catch (e) {
+    return null;
+  }
+
+  return new google.auth.JWT({
+    email: key.client_email,
+    key: key.private_key,
+    scopes: ['https://www.googleapis.com/auth/tasks.readonly'],
+    subject: userEmail,
+  });
+}
+
+// Fetch Google Tasks due on dateStr for a person. Returns full-day busy if any tasks found.
+// Requires domain-wide delegation configured for the service account.
+async function getPersonTasksBusy(person, dateStr) {
+  if (!person.email) return [];
+
+  const taskAuth = getTasksAuthForUser(person.email);
+  if (!taskAuth) return [];
+
+  const tasksClient = google.tasks({ version: 'v1', auth: taskAuth });
+
+  const dueMin = DateTime.fromISO(`${dateStr}T00:00:00`, { zone: TIMEZONE }).toISO();
+  const dueMax = DateTime.fromISO(`${dateStr}T23:59:59`, { zone: TIMEZONE }).toISO();
+
+  const taskListsRes = await tasksClient.tasklists.list();
+  const taskLists = taskListsRes.data.items || [];
+
+  for (const taskList of taskLists) {
+    const taskItemsRes = await tasksClient.tasks.list({
+      tasklist: taskList.id,
+      dueMin,
+      dueMax,
+      showCompleted: false,
+    });
+    const items = taskItemsRes.data.items || [];
+    if (items.length > 0) {
+      console.log('[TASKS]', items.length, 'task(s) due on', dateStr, 'for', person.email, '— marking full day busy');
+      return [{ start: '00:00', end: '23:59' }];
+    }
+  }
+
+  return [];
+}
+
 // Returns busy periods per email for a given date using events.list per person.
+// Also checks Google Tasks (tasks with due dates treated as full-day busy).
 // Falls back to all-day busy if a calendar is inaccessible (e.g. not shared with service account).
 // busyMap[email] = [{ start: 'HH:MM', end: 'HH:MM' }, ...]  (in IST HH:MM)
 async function getPersonsBusy(persons, dateStr) {
@@ -88,6 +143,16 @@ async function getPersonsBusy(persons, dateStr) {
         console.error('[SLOTS] Cannot access calendar for:', person.email, err.message);
         // Calendar not accessible — mark as busy all day so we never show as free
         busyMap[person.email] = [{ start: '00:00', end: '23:59' }];
+      }
+
+      // Also check Google Tasks — tasks only have due dates, so treat any task due today as full-day busy
+      try {
+        const taskBusy = await getPersonTasksBusy(person, dateStr);
+        if (taskBusy.length > 0) {
+          busyMap[person.email] = [...(busyMap[person.email] || []), ...taskBusy];
+        }
+      } catch (err) {
+        console.error('[TASKS] Cannot access tasks for:', person.email, err.message);
       }
     })
   );

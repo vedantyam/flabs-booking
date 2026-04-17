@@ -4,12 +4,12 @@ import axios from 'axios';
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 // ── Layout constants ──────────────────────────────────────────────────────────
-const HOUR_H    = 64;           // px per hour
-const MIN_PX    = HOUR_H / 60; // px per minute  (≈1.067)
-const DAY_START = 8 * 60;      // 08:00 in minutes
-const DAY_END   = 22 * 60;     // 22:00 in minutes
-const TIME_W    = 52;           // px width of time gutter column
-const TOTAL_H   = Math.round((DAY_END - DAY_START) * MIN_PX); // grid height px
+const HOUR_H    = 64;
+const MIN_PX    = HOUR_H / 60;
+const DAY_START = 8 * 60;
+const DAY_END   = 22 * 60;
+const TIME_W    = 52;
+const TOTAL_H   = Math.round((DAY_END - DAY_START) * MIN_PX);
 
 // ── Person colour palette ─────────────────────────────────────────────────────
 const PALETTE = {
@@ -27,9 +27,9 @@ function toMin(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
   return h * 60 + (m || 0);
 }
-function toY(min)              { return Math.round((min - DAY_START) * MIN_PX); }
-function toH(sMin, eMin)       { return Math.round((eMin - sMin) * MIN_PX); }
-function clamp(v, lo, hi)      { return Math.max(lo, Math.min(hi, v)); }
+function toY(min)         { return Math.round((min - DAY_START) * MIN_PX); }
+function toH(sMin, eMin)  { return Math.round((eMin - sMin) * MIN_PX); }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 function fmtDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -45,7 +45,6 @@ function shiftDay(dateStr, n) {
 function todayStr() { return new Date().toISOString().split('T')[0]; }
 function nowMin()   { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); }
 
-// Hour + half-hour tick marks for the time gutter
 const TIME_TICKS = Array.from(
   { length: (DAY_END - DAY_START) / 30 },
   (_, i) => DAY_START + i * 30
@@ -54,20 +53,18 @@ const TIME_TICKS = Array.from(
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function DayView() {
   const today = todayStr();
-  const [date, setDate]       = useState(today);
-  const [data, setData]       = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
-  const [nowY, setNowY]       = useState(null);
-  const scrollRef             = useRef(null);
 
-  // ── Current-time red line ───────────────────────────────────────────────────
-  function refreshNow() {
-    const m = nowMin();
-    setNowY(m >= DAY_START && m <= DAY_END ? toY(m) : null);
-  }
+  // date and data are always in sync — both update together via navigateTo()
+  const [date, setDate]           = useState(today);
+  const [data, setData]           = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState('');
+  const [nowY, setNowY]           = useState(null);
+  const [opacity, setOpacity]     = useState(1);
+  const [personFilter, setPersonFilter] = useState(''); // '' = All Team
+  const scrollRef                 = useRef(null);
 
-  // ── Fetch calendar data ─────────────────────────────────────────────────────
+  // ── Fetch calendar data for a given date ────────────────────────────────────
   async function load(d) {
     setLoading(true);
     setError('');
@@ -81,23 +78,27 @@ export default function DayView() {
     }
   }
 
-  // Reload when date changes
-  useEffect(() => { load(date); }, [date]);
+  // Reload when date changes (date + data always change together via navigateTo)
+  useEffect(() => { load(date); }, [date]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-refresh every 60 s
   useEffect(() => {
     const t = setInterval(() => load(date), 60_000);
     return () => clearInterval(t);
-  }, [date]);
+  }, [date]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Tick current-time line every 60 s
+  // Current-time red line ticks every 60 s
   useEffect(() => {
+    function refreshNow() {
+      const m = nowMin();
+      setNowY(m >= DAY_START && m <= DAY_END ? toY(m) : null);
+    }
     refreshNow();
     const t = setInterval(refreshNow, 60_000);
     return () => clearInterval(t);
   }, []);
 
-  // Auto-scroll: show 1 hour before current time on load
+  // Auto-scroll: show 1 hour before current time on each date change
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -105,19 +106,35 @@ export default function DayView() {
     setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollTo; }, 80);
   }, [date]);
 
+  // ── Navigation with fade transition ─────────────────────────────────────────
+  function navigateTo(newDate) {
+    if (newDate === date) return;
+    setOpacity(0);
+    setTimeout(() => {
+      setDate(newDate);
+      setOpacity(1);
+    }, 150);
+  }
+
   const persons      = data?.persons      || [];
   const personEvents = data?.personEvents || [];
+
+  // Apply person filter — '' means show all
+  const visiblePersons = personFilter
+    ? persons.filter(p => p.name === personFilter)
+    : persons;
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden"
       style={{ height: 680 }}>
 
-      {/* ── Navigation bar ── */}
+      {/* ── Navigation bar (never fades) ── */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 flex-shrink-0 bg-white">
+        {/* Date prev/next */}
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setDate(d => shiftDay(d, -1))}
+            onClick={() => navigateTo(shiftDay(date, -1))}
             className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 transition text-xl leading-none"
             aria-label="Previous day"
           >‹</button>
@@ -125,20 +142,34 @@ export default function DayView() {
             {fmtDate(date)}
           </span>
           <button
-            onClick={() => setDate(d => shiftDay(d, 1))}
+            onClick={() => navigateTo(shiftDay(date, 1))}
             className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 transition text-xl leading-none"
             aria-label="Next day"
           >›</button>
         </div>
+
+        {/* Right controls: spinner + Today + person filter */}
         <div className="flex items-center gap-2">
           {loading && (
             <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
           )}
           <button
-            onClick={() => setDate(today)}
+            onClick={() => navigateTo(today)}
             disabled={date === today}
             className="text-xs px-3 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition"
           >Today</button>
+
+          {/* Person filter dropdown */}
+          <select
+            value={personFilter}
+            onChange={e => setPersonFilter(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer"
+          >
+            <option value="">All Team</option>
+            {persons.map(p => (
+              <option key={p.id} value={p.name}>{p.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -149,169 +180,167 @@ export default function DayView() {
         </div>
       )}
 
-      {/* ── Sticky person-name header ── */}
-      <div className="flex flex-shrink-0 bg-white border-b border-gray-100 shadow-sm">
-        {/* Gutter spacer */}
-        <div style={{ width: TIME_W, minWidth: TIME_W }} className="flex-shrink-0" />
-        {persons.length === 0 && !loading && (
-          <div className="flex-1 py-2 text-xs text-gray-400 text-center">
-            No active team members found
-          </div>
-        )}
-        {persons.map(p => {
-          const c = getColor(p.name);
-          return (
-            <div key={p.id}
-              className="flex-1 py-2 px-1 text-center border-l border-gray-100 overflow-hidden">
-              <span
-                className="inline-block text-xs font-semibold text-white px-2 py-0.5 rounded-full truncate max-w-full"
-                style={{ backgroundColor: c.pill }}
-              >{p.name}</span>
+      {/* ── Content area (fades on day navigation) ── */}
+      <div
+        className="flex flex-col flex-1 overflow-hidden"
+        style={{ opacity, transition: 'opacity 0.15s ease' }}
+      >
+        {/* Sticky person-name header */}
+        <div className="flex flex-shrink-0 bg-white border-b border-gray-100 shadow-sm">
+          <div style={{ width: TIME_W, minWidth: TIME_W }} className="flex-shrink-0" />
+          {visiblePersons.length === 0 && !loading && (
+            <div className="flex-1 py-2 text-xs text-gray-400 text-center">
+              No active team members found
             </div>
-          );
-        })}
-      </div>
-
-      {/* ── Scrollable time grid ── */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="flex relative" style={{ height: TOTAL_H }}>
-
-          {/* Time gutter */}
-          <div
-            className="flex-shrink-0 relative border-r border-gray-100 bg-white"
-            style={{ width: TIME_W, minWidth: TIME_W }}
-          >
-            {TIME_TICKS.filter(m => m % 60 === 0).map(min => (
-              <div
-                key={min}
-                className="absolute right-1.5 leading-none select-none"
-                style={{ top: toY(min) - 6, fontSize: 10, color: '#9CA3AF' }}
-              >
-                {`${String(min / 60).padStart(2, '0')}:00`}
-              </div>
-            ))}
-          </div>
-
-          {/* Person columns */}
-          {persons.map((p, colIdx) => {
+          )}
+          {visiblePersons.map(p => {
             const c = getColor(p.name);
-            const evts = personEvents.find(pe => pe.personId === p.id)?.events || [];
-
-            const workStart = toMin(p.work_start || '08:00');
-            const workEnd   = toMin(p.work_end   || '22:00');
-
-            const breaks = [];
-            if (p.lunch_start && p.lunch_end) {
-              breaks.push({ label: 'LUNCH', s: toMin(p.lunch_start), e: toMin(p.lunch_end) });
-            }
-            if (p.tea_start && p.tea_end) {
-              breaks.push({ label: 'TEA', s: toMin(p.tea_start), e: toMin(p.tea_end) });
-            }
-
             return (
-              <div
-                key={p.id}
-                className="flex-1 relative border-l border-gray-100"
-                style={{ backgroundColor: colIdx % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }}
-              >
-                {/* Hour grid lines */}
-                {TIME_TICKS.filter(m => m % 60 === 0).map(min => (
-                  <div key={min}
-                    className="absolute left-0 right-0 border-t border-gray-100 pointer-events-none"
-                    style={{ top: toY(min) }} />
-                ))}
-                {/* Half-hour dashed lines */}
-                {TIME_TICKS.filter(m => m % 60 === 30).map(min => (
-                  <div key={min}
-                    className="absolute left-0 right-0 pointer-events-none"
-                    style={{ top: toY(min), borderTop: '1px dashed #F0F0F0' }} />
-                ))}
-
-                {/* Before-work-hours dimmed overlay */}
-                {workStart > DAY_START && (
-                  <div className="absolute left-0 right-0 bg-gray-100/60 pointer-events-none"
-                    style={{ top: 0, height: toY(workStart) }} />
-                )}
-                {/* After-work-hours dimmed overlay */}
-                {workEnd < DAY_END && (
-                  <div className="absolute left-0 right-0 bg-gray-100/60 pointer-events-none"
-                    style={{ top: toY(workEnd), height: TOTAL_H - toY(workEnd) }} />
-                )}
-
-                {/* Break blocks */}
-                {breaks.map(b => {
-                  const cs = clamp(b.s, DAY_START, DAY_END);
-                  const ce = clamp(b.e, DAY_START, DAY_END);
-                  if (ce <= cs) return null;
-                  const h = Math.max(toH(cs, ce) - 2, 12);
-                  return (
-                    <div key={b.label}
-                      className="absolute left-px right-px rounded overflow-hidden flex items-center justify-center pointer-events-none"
-                      style={{
-                        top: toY(cs) + 1,
-                        height: h,
-                        background:
-                          'repeating-linear-gradient(45deg,#E5E7EB 0,#E5E7EB 3px,#F9FAFB 3px,#F9FAFB 8px)',
-                      }}
-                    >
-                      <span style={{ fontSize: 9, color: '#9CA3AF', fontWeight: 700, letterSpacing: '0.05em' }}>
-                        {b.label}
-                      </span>
-                    </div>
-                  );
-                })}
-
-                {/* Calendar events */}
-                {evts.map((ev, i) => {
-                  const sm = toMin(ev.start);
-                  const em = toMin(ev.end);
-                  const cs = clamp(sm, DAY_START, DAY_END);
-                  const ce = clamp(em, DAY_START, DAY_END);
-                  if (ce <= cs) return null;
-                  const h = Math.max(toH(cs, ce) - 2, 18);
-                  return (
-                    <div key={i}
-                      className="absolute left-0.5 right-0.5 rounded-md overflow-hidden px-1.5 py-0.5"
-                      style={{
-                        top: toY(cs) + 1,
-                        height: h,
-                        backgroundColor: c.bg,
-                        borderLeft: `3px solid ${c.border}`,
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
-                      }}
-                    >
-                      <p className="font-semibold leading-tight truncate"
-                        style={{ color: c.text, fontSize: 10 }}>
-                        {ev.title}
-                      </p>
-                      {h >= 30 && (
-                        <p className="leading-tight truncate"
-                          style={{ color: c.text, fontSize: 9, opacity: 0.65 }}>
-                          {ev.start}–{ev.end}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
+              <div key={p.id}
+                className="flex-1 py-2 px-1 text-center border-l border-gray-100 overflow-hidden">
+                <span
+                  className="inline-block text-xs font-semibold text-white px-2 py-0.5 rounded-full truncate max-w-full"
+                  style={{ backgroundColor: c.pill }}
+                >{p.name}</span>
               </div>
             );
           })}
+        </div>
 
-          {/* ── Current-time red line (spans all person columns) ── */}
-          {nowY !== null && (
+        {/* Scrollable time grid */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="flex relative" style={{ height: TOTAL_H }}>
+
+            {/* Time gutter */}
             <div
-              className="absolute pointer-events-none z-20"
-              style={{ top: nowY, left: TIME_W, right: 0 }}
+              className="flex-shrink-0 relative border-r border-gray-100 bg-white"
+              style={{ width: TIME_W, minWidth: TIME_W }}
             >
-              <div className="relative" style={{ borderTop: '2px solid #EF4444' }}>
+              {TIME_TICKS.filter(m => m % 60 === 0).map(min => (
                 <div
-                  className="absolute rounded-full bg-red-400"
-                  style={{ width: 8, height: 8, top: -5, left: -4 }}
-                />
-              </div>
+                  key={min}
+                  className="absolute right-1.5 leading-none select-none"
+                  style={{ top: toY(min) - 6, fontSize: 10, color: '#9CA3AF' }}
+                >
+                  {`${String(min / 60).padStart(2, '0')}:00`}
+                </div>
+              ))}
             </div>
-          )}
 
+            {/* Person columns */}
+            {visiblePersons.map((p, colIdx) => {
+              const c    = getColor(p.name);
+              const evts = personEvents.find(pe => pe.personId === p.id)?.events || [];
+
+              const workStart = toMin(p.work_start || '08:00');
+              const workEnd   = toMin(p.work_end   || '22:00');
+
+              const breaks = [];
+              if (p.lunch_start && p.lunch_end)
+                breaks.push({ label: 'LUNCH', s: toMin(p.lunch_start), e: toMin(p.lunch_end) });
+              if (p.tea_start && p.tea_end)
+                breaks.push({ label: 'TEA', s: toMin(p.tea_start), e: toMin(p.tea_end) });
+
+              return (
+                <div
+                  key={p.id}
+                  className="flex-1 relative border-l border-gray-100"
+                  style={{ backgroundColor: colIdx % 2 === 0 ? '#FFFFFF' : '#FAFAFA' }}
+                >
+                  {/* Hour grid lines */}
+                  {TIME_TICKS.filter(m => m % 60 === 0).map(min => (
+                    <div key={min}
+                      className="absolute left-0 right-0 border-t border-gray-100 pointer-events-none"
+                      style={{ top: toY(min) }} />
+                  ))}
+                  {/* Half-hour dashed lines */}
+                  {TIME_TICKS.filter(m => m % 60 === 30).map(min => (
+                    <div key={min}
+                      className="absolute left-0 right-0 pointer-events-none"
+                      style={{ top: toY(min), borderTop: '1px dashed #F0F0F0' }} />
+                  ))}
+
+                  {/* Before-work dimmed overlay */}
+                  {workStart > DAY_START && (
+                    <div className="absolute left-0 right-0 bg-gray-100/60 pointer-events-none"
+                      style={{ top: 0, height: toY(workStart) }} />
+                  )}
+                  {/* After-work dimmed overlay */}
+                  {workEnd < DAY_END && (
+                    <div className="absolute left-0 right-0 bg-gray-100/60 pointer-events-none"
+                      style={{ top: toY(workEnd), height: TOTAL_H - toY(workEnd) }} />
+                  )}
+
+                  {/* Break blocks */}
+                  {breaks.map(b => {
+                    const cs = clamp(b.s, DAY_START, DAY_END);
+                    const ce = clamp(b.e, DAY_START, DAY_END);
+                    if (ce <= cs) return null;
+                    const h = Math.max(toH(cs, ce) - 2, 12);
+                    return (
+                      <div key={b.label}
+                        className="absolute left-px right-px rounded overflow-hidden flex items-center justify-center pointer-events-none"
+                        style={{
+                          top: toY(cs) + 1, height: h,
+                          background: 'repeating-linear-gradient(45deg,#E5E7EB 0,#E5E7EB 3px,#F9FAFB 3px,#F9FAFB 8px)',
+                        }}
+                      >
+                        <span style={{ fontSize: 9, color: '#9CA3AF', fontWeight: 700, letterSpacing: '0.05em' }}>
+                          {b.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {/* Calendar events */}
+                  {evts.map((ev, i) => {
+                    const cs = clamp(toMin(ev.start), DAY_START, DAY_END);
+                    const ce = clamp(toMin(ev.end),   DAY_START, DAY_END);
+                    if (ce <= cs) return null;
+                    const h = Math.max(toH(cs, ce) - 2, 18);
+                    return (
+                      <div key={i}
+                        className="absolute left-0.5 right-0.5 rounded-md overflow-hidden px-1.5 py-0.5"
+                        style={{
+                          top: toY(cs) + 1, height: h,
+                          backgroundColor: c.bg,
+                          borderLeft: `3px solid ${c.border}`,
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                        }}
+                      >
+                        <p className="font-semibold leading-tight truncate"
+                          style={{ color: c.text, fontSize: 10 }}>
+                          {ev.title}
+                        </p>
+                        {h >= 30 && (
+                          <p className="leading-tight truncate"
+                            style={{ color: c.text, fontSize: 9, opacity: 0.65 }}>
+                            {ev.start}–{ev.end}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+
+            {/* Current-time red line */}
+            {nowY !== null && (
+              <div
+                className="absolute pointer-events-none z-20"
+                style={{ top: nowY, left: TIME_W, right: 0 }}
+              >
+                <div className="relative" style={{ borderTop: '2px solid #EF4444' }}>
+                  <div
+                    className="absolute rounded-full bg-red-400"
+                    style={{ width: 8, height: 8, top: -5, left: -4 }}
+                  />
+                </div>
+              </div>
+            )}
+
+          </div>
         </div>
       </div>
     </div>

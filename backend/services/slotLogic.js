@@ -149,16 +149,14 @@ async function getDaySlotsWithAvailability(dateStr, supabase, gcalService, perso
     .eq('date', dateStr);
   if (bookingsError) throw bookingsError;
 
-  // Get Google Calendar freebusy for the day — always fetch fresh, no cache
+  // Get Google Calendar busy periods via events.list per person (same approach as calendar/day).
+  // freebusy.query silently returns empty for calendars not shared with the service account.
   let gcalBusy = {};
   if (gcalService && persons.length > 0) {
     try {
-      // Use IST ISO strings with +05:30 offset (not UTC) for accurate day boundaries
-      const dayStartIST = toIST_ISO(dateStr, '00:00');
-      const dayEndIST = toIST_ISO(dateStr, '23:59');
-      gcalBusy = await gcalService.getFreeBusy(persons, dayStartIST, dayEndIST);
+      gcalBusy = await gcalService.getPersonsBusy(persons, dateStr);
     } catch (err) {
-      console.error('Google Calendar freebusy error:', err.message);
+      console.error('[SLOTS] Google Calendar events.list error:', err.message);
     }
   }
 
@@ -173,6 +171,30 @@ async function getDaySlotsWithAvailability(dateStr, supabase, gcalService, perso
       bookings || [],
       gcalBusy
     );
+
+    // Log per-person status for each slot so Vercel logs show exactly what's happening
+    persons.forEach(person => {
+      const isFree = freePersons.some(p => p.id === person.id);
+      let status;
+      if (!isPersonScheduledForSlot(person, slot.start, slot.end)) {
+        status = 'not_working';
+      } else if (woPersonIds.has(person.id)) {
+        status = 'wo_day';
+      } else if ((bookings || []).some(b =>
+        b.support_person_id === person.id &&
+        normalizeTime(b.slot_start) < slot.end &&
+        normalizeTime(b.slot_end) > slot.start
+      )) {
+        status = 'booked';
+      } else if (gcalBusy[person.email] && gcalBusy[person.email].some(busy =>
+        busy.start < slot.end && busy.end > slot.start
+      )) {
+        status = 'gcal_busy';
+      } else {
+        status = isFree ? 'free' : 'unknown';
+      }
+      console.log('[SLOTS] Slot', slot.start, '-', slot.end, 'status for', person.name, ':', status);
+    });
 
     const base = {
       date: dateStr,

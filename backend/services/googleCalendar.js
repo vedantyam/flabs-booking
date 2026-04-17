@@ -32,9 +32,55 @@ function getCalendarClient() {
   return google.calendar({ version: 'v3', auth });
 }
 
-// Returns busy periods per email for a given IST time range
-// timeMinIST / timeMaxIST must be ISO strings with +05:30 offset, e.g. "2024-01-15T00:00:00.000+05:30"
-// gcalBusy[email] = [{ start: 'HH:MM', end: 'HH:MM' }, ...]  (in IST HH:MM)
+// Returns busy periods per email for a given date using events.list per person.
+// Falls back to all-day busy if a calendar is inaccessible (e.g. not shared with service account).
+// busyMap[email] = [{ start: 'HH:MM', end: 'HH:MM' }, ...]  (in IST HH:MM)
+async function getPersonsBusy(persons, dateStr) {
+  const calendar = getCalendarClient();
+
+  // IST-offset ISO strings to keep day boundaries correct
+  const timeMin = DateTime.fromISO(`${dateStr}T00:00:00`, { zone: TIMEZONE }).toISO();
+  const timeMax = DateTime.fromISO(`${dateStr}T23:59:59`, { zone: TIMEZONE }).toISO();
+
+  const busyMap = {};
+
+  await Promise.all(
+    persons.map(async (person) => {
+      if (!person.email) return;
+
+      console.log('[SLOTS] Checking person:', person.name, person.email);
+      try {
+        const response = await calendar.events.list({
+          calendarId: person.email,
+          timeMin,
+          timeMax,
+          singleEvents: true,
+          orderBy: 'startTime',
+          timeZone: TIMEZONE,
+        });
+
+        const events = (response.data.items || [])
+          .filter(e => e.start?.dateTime) // skip all-day events
+          .map(e => {
+            const startIST = DateTime.fromISO(e.start.dateTime).setZone(TIMEZONE).toFormat('HH:mm');
+            const endIST   = DateTime.fromISO(e.end.dateTime).setZone(TIMEZONE).toFormat('HH:mm');
+            return { start: startIST, end: endIST };
+          });
+
+        console.log('[SLOTS] Events found:', events.length, 'for', person.email);
+        busyMap[person.email] = events;
+      } catch (err) {
+        console.error('[SLOTS] Cannot access calendar for:', person.email, err.message);
+        // Calendar not accessible — mark as busy all day so we never show as free
+        busyMap[person.email] = [{ start: '00:00', end: '23:59' }];
+      }
+    })
+  );
+
+  return busyMap;
+}
+
+// Kept for any callers that still use the freebusy approach.
 async function getFreeBusy(persons, timeMinIST, timeMaxIST) {
   const calendar = getCalendarClient();
 
@@ -60,7 +106,6 @@ async function getFreeBusy(persons, timeMinIST, timeMaxIST) {
 
   for (const email of emails) {
     const busyPeriods = (calendars[email]?.busy || []).map(period => {
-      // Convert UTC ISO to IST HH:MM for comparison
       const startIST = DateTime.fromISO(period.start).setZone(TIMEZONE);
       const endIST = DateTime.fromISO(period.end).setZone(TIMEZONE);
       return {
@@ -140,4 +185,4 @@ async function updateEvent(person, eventId, dateStr, slotStart, slotEnd, title) 
   });
 }
 
-module.exports = { getFreeBusy, createEvent, deleteEvent, updateEvent };
+module.exports = { getPersonsBusy, getFreeBusy, createEvent, deleteEvent, updateEvent };

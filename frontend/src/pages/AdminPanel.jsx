@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import BookingsList from '../components/BookingsList.jsx';
 import SupportPersonManager from '../components/SupportPersonManager.jsx';
 import DayView from '../components/DayView.jsx';
 
 const TABS = [
   { id: 'calendar', label: 'Calendar View' },
   { id: 'team',     label: 'Support Team' },
-  { id: 'schedule', label: 'Schedule' },
 ];
 
 export default function AdminPanel() {
@@ -66,20 +64,11 @@ export default function AdminPanel() {
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
 
-        {/* Tab 1 — Calendar View */}
         {activeTab === 'calendar' && <DayView />}
 
-        {/* Tab 2 — Support Team */}
         {activeTab === 'team' && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
             <SupportPersonManager />
-          </div>
-        )}
-
-        {/* Tab 3 — Schedule */}
-        {activeTab === 'schedule' && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-6">
-            <BookingsList />
           </div>
         )}
 

@@ -60,12 +60,27 @@ async function getPersonsBusy(persons, dateStr) {
         });
 
         const events = (response.data.items || [])
-          .filter(e => e.start?.dateTime) // skip all-day events
           .map(e => {
-            const startIST = DateTime.fromISO(e.start.dateTime).setZone(TIMEZONE).toFormat('HH:mm');
-            const endIST   = DateTime.fromISO(e.end.dateTime).setZone(TIMEZONE).toFormat('HH:mm');
-            return { start: startIST, end: endIST };
-          });
+            console.log('[GCAL] Event for', person.email, ':', e.summary,
+              'type:', e.start?.dateTime ? 'timed' : 'all-day',
+              'start:', e.start?.dateTime || e.start?.date
+            );
+
+            if (e.start?.dateTime) {
+              // Timed event — convert to IST HH:MM
+              const startIST = DateTime.fromISO(e.start.dateTime).setZone(TIMEZONE).toFormat('HH:mm');
+              const endIST   = DateTime.fromISO(e.end.dateTime).setZone(TIMEZONE).toFormat('HH:mm');
+              return { start: startIST, end: endIST };
+            }
+
+            if (e.start?.date) {
+              // All-day event (start.date = 'YYYY-MM-DD') — blocks the entire day
+              return { start: '00:00', end: '23:59' };
+            }
+
+            return null;
+          })
+          .filter(Boolean);
 
         console.log('[SLOTS] Events found:', events.length, 'for', person.email);
         busyMap[person.email] = events;

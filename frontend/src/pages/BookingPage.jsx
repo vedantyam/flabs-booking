@@ -8,7 +8,7 @@ const POLL_INTERVAL = 30000;
 const BACKOFF = 5000;
 
 // Replace with actual extension ID after installing
-const EXTENSION_ID = 'PLACEHOLDER_EXTENSION_ID';
+const EXTENSION_ID = 'fnffjpffpocbplpocakafbjfillmkeif';
 
 function getTodayStr() {
   return new Date().toISOString().split('T')[0];

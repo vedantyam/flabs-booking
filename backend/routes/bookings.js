@@ -22,7 +22,7 @@ function getSupabase() {
 // Book a slot — assigns a support person round-robin
 router.post('/', async (req, res, next) => {
   try {
-    const { date, slot_start, slot_end } = req.body;
+    const { date, slot_start, slot_end, lead_phone, sp_name, notes } = req.body;
 
     if (!date || !slot_start || !slot_end) {
       return res.status(400).json({ error: 'date, slot_start, slot_end are required' });
@@ -84,12 +84,19 @@ router.post('/', async (req, res, next) => {
     // Create Google Calendar event
     let googleEventId = null;
     try {
+      const eventTitle = `FLABS Demo${sp_name ? ` — ${sp_name}` : ''}`;
+      const eventDesc = [
+        lead_phone ? `Lead phone: ${lead_phone}` : null,
+        notes ? `Notes: ${notes}` : null,
+        'Booked via FLABS Booking System',
+      ].filter(Boolean).join('\n');
       googleEventId = await gcalService.createEvent(
         assignee,
         date,
         slot_start,
         slot_end,
-        'FLABS Demo'
+        eventTitle,
+        eventDesc
       );
     } catch (err) {
       console.error('Failed to create GCal event:', err.message);
@@ -105,6 +112,9 @@ router.post('/', async (req, res, next) => {
         slot_end,
         booked_by: null,
         google_event_id: googleEventId,
+        lead_phone: lead_phone || null,
+        sp_name: sp_name || null,
+        notes: notes || null,
       })
       .select()
       .single();

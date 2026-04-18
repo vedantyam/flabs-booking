@@ -200,7 +200,7 @@ async function getFreeBusy(persons, timeMinIST, timeMaxIST) {
 }
 
 // Create a Google Calendar event on a person's calendar
-async function createEvent(person, dateStr, slotStart, slotEnd, title) {
+async function createEvent(person, dateStr, slotStart, slotEnd, title, description) {
   const calendar = getCalendarClient();
 
   const startDT = DateTime.fromISO(`${dateStr}T${slotStart}:00`, { zone: TIMEZONE });
@@ -210,7 +210,7 @@ async function createEvent(person, dateStr, slotStart, slotEnd, title) {
     calendarId: person.email,
     requestBody: {
       summary: title || 'FLABS Demo',
-      description: 'Demo booked via FLABS Booking System',
+      description: description || 'Demo booked via FLABS Booking System',
       start: {
         dateTime: startDT.toISO(),
         timeZone: TIMEZONE,
